@@ -1,0 +1,3 @@
+#ifndef STUB_GSTOOLKIT_H
+#define STUB_GSTOOLKIT_H
+#endif // STUB_GSTOOLKIT_H

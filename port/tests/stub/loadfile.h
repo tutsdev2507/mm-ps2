@@ -1,0 +1,3 @@
+#ifndef STUB_LOADFILE_H
+#define STUB_LOADFILE_H
+#endif // STUB_LOADFILE_H

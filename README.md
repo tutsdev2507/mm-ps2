@@ -28,23 +28,40 @@ actor data) are big-endian and must be byte-swapped on load.
 mm-ps2/
   port/
     src/main.c              # EE entry: init gsKit, run the game loop
-    src/ultra/              # libultra shim (OS/VI/controller/gu/DMA)  [M2]
-    src/gfx/                # F3DEX2 GBI interpreter -> gsKit           [M2]
+    src/gfx/gbi.h           # F3DEX2 GBI subset types/macros            [M2]
+    src/gfx/gfx.{h,c}       # F3DEX2 display-list interpreter -> gsKit  [M2]
+    src/ultra/              # libultra shim (OS/VI/controller/gu/DMA)  [M3]
     src/audio/              # audio backend (stub first)                [M5]
     src/asset/              # ROM asset loader + endian conversion     [M1]
+    tests/                  # host-side interpreter tests (native cc)
   scripts/
     setup.sh                # fetch decompiled game source at pinned rev
     extract_assets.sh       # run ZAPD extraction (needs user's ROM)
-  .github/workflows/ps2.yml # build with ps2dev/ps2dev + prebuilt gsKit
+  .github/workflows/ps2.yml # EE build (ps2dev/ps2dev) + host tests
 ```
+
+## The GBI interpreter (M2)
+
+The game emits **F3DEX2 / F3DZEX2** display lists (`-DF3DEX_GBI_2`, which also defines
+`F3DEX_GBI`, so triangle indices are the `×2` encoding, in `w0` for `G_TRI1` and in
+`w0`/`w1` for `G_TRI2`/`G_QUAD`). `port/src/gfx/gfx.c` walks a list and emits gsKit
+primitives. Implemented: `G_MTX`/`G_POPMTX` (proj + modelview stacks), `G_VTX`/
+`G_MODIFYVTX`, `G_TRI1`/`G_TRI2`/`G_QUAD`, `G_DL`/`G_ENDDL`, `G_MOVEMEM` (viewport),
+`G_MOVEWORD` (`G_MW_SEGMENT`/`G_MW_PERSPNORM`), colors, `G_GEOMETRYMODE`, and texture /
+combiner state (recorded, not yet rasterised). Unknown commands are no-ops so lists run.
+
+Addresses in `w1` are resolved through the 16-entry segment table (`gsSPSegment`), falling
+back to a raw pointer for hand-built lists.
 
 ## Roadmap / milestones
 
 - [x] **M0 — toolchain harness**: build a bootable PS2 ELF that inits gsKit and
-      clears the screen. Proves the CI + gsKit pipeline. *(in progress)*
-- [ ] **M1 — assets**: extract assets from the user's USA 1.0 ROM with ZAPD.
-- [ ] **M2 — renderer**: F3DEX2 GBI display-list interpreter emitting `gsKit` prims;
-      draw one static display list (a room / title logo).
+      clears the screen. Proves the CI + gsKit pipeline.
+- [x] **M1 — assets**: extract assets from the user's USA 1.0 ROM with ZAPD.
+- [ ] **M2 — renderer**: F3DEX2 GBI display-list interpreter emitting `gsKit` prims.
+      Now renders an animated 3D cube (modelview rotation + perspective + Z-buffer).
+      *(in progress: geometry path done; textures/combiner pending, real game DLs
+      need M3)*
 - [ ] **M3 — boot**: libultra shim (threads, mesg queues, timers, VI swap) so
       `bootproc -> Main -> graph thread` runs and presents frames.
 - [ ] **M4 — input**: controller shim over `libpad` (PadMgr).
@@ -58,3 +75,12 @@ never committed. See `scripts/setup.sh` and `scripts/extract_assets.sh`.
 
 The PS2 ELF is built via GitHub Actions (`ps2dev/ps2dev` docker + prebuilt `gsKit`);
 local Android/Termux cannot build MIPS/EE (`/storage` is `noexec`).
+
+The GBI interpreter has native host tests (no EE toolchain needed):
+
+```
+bash port/tests/run.sh
+```
+
+They compile `src/gfx/gfx.c` against stub headers and assert the emitted triangles for
+TRI1/TRI2/QUAD, viewport, segment addressing and geometry-mode set/clear.
