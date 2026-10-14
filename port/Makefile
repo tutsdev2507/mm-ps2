@@ -7,7 +7,7 @@ EE_OBJS  = main.o
 vpath %.c src
 EE_INCS += -I$(GSKIT)/include
 EE_LDFLAGS += -L$(GSKIT)/lib
-EE_LIBS  = -lgsKit -lpad -lmath3d -lgraph -ldraw -lpacket -ldma -ldebug
+EE_LIBS  = -lgskit -lgskit_toolkit -lpad -lmath3d -lgraph -ldraw -lpacket -ldma -ldebug
 
 include $(PS2SDK)/samples/Makefile.pref
 include $(PS2SDK)/samples/Makefile.eeglobal
