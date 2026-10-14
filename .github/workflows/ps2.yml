@@ -27,7 +27,7 @@ jobs:
           find "$PS2SDK/ports" -name 'libgsKit.a'
 
       - name: Build port
-        run: make -C port
+        run: GSKIT="$PS2SDK/ports" make -C port
 
       - name: Upload ELF
         uses: actions/upload-artifact@v4
