@@ -40,7 +40,7 @@ mm-ps2/
 
 ## Roadmap / milestones
 
-- [ ] **M0 — toolchain harness**: build a bootable PS2 ELF that inits gsKit and
+- [x] **M0 — toolchain harness**: build a bootable PS2 ELF that inits gsKit and
       clears the screen. Proves the CI + gsKit pipeline. *(in progress)*
 - [ ] **M1 — assets**: extract assets from the user's USA 1.0 ROM with ZAPD.
 - [ ] **M2 — renderer**: F3DEX2 GBI display-list interpreter emitting `gsKit` prims;
