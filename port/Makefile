@@ -1,6 +1,6 @@
 PS2DEV ?= /usr/local/ps2dev
 PS2SDK ?= $(PS2DEV)/ps2sdk
-GSKIT  ?= $(PS2DEV)/gsKit
+GSKIT  ?= $(PS2SDK)/ports
 
 EE_BIN   = mm-ps2.elf
 EE_OBJS  = main.o

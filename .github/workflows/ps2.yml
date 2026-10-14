@@ -14,22 +14,17 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Ensure make + git
-        run: apk add --no-cache make git >/dev/null 2>&1 || true
+      - name: Ensure build tools
+        run: apk add --no-cache make git cmake || true
 
-      - name: Locate gsKit
+      - name: Build + install gsKit
         run: |
-          echo "PS2DEV=$PS2DEV PS2SDK=$PS2SDK"
-          find /usr/local/ps2dev -name 'libgsKit*' -o -name 'gsKit.h' 2>/dev/null || true
-
-      - name: Build gsKit (if missing)
-        run: |
-          if ! find /usr/local/ps2dev -name 'libgsKit.a' | grep -q .; then
+          if ! find "$PS2SDK/ports" -name 'libgsKit.a' 2>/dev/null | grep -q .; then
             git clone --depth 1 https://github.com/ps2dev/gsKit.git /tmp/gsKit
             make -C /tmp/gsKit -j"$(nproc)"
             make -C /tmp/gsKit install
           fi
-          find /usr/local/ps2dev -name 'libgsKit.a' 2>/dev/null
+          find "$PS2SDK/ports" -name 'libgsKit.a'
 
       - name: Build port
         run: make -C port
