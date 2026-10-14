@@ -26,7 +26,7 @@ int main(int argc, char *argv[])
     dmaKit_chan_init(DMA_CHANNEL_GIF);
 
     gsKit_init_screen(gsGlobal);
-    gsKit_mode_switch(gsGlobal, GSKIT_ONESHOT);
+    gsKit_mode_switch(gsGlobal, GS_ONESHOT);
 
     int frame = 0;
     while (frame < 600) {
