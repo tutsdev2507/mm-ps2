@@ -1,0 +1,10 @@
+build/
+third_party/
+*.elf
+*.o
+*.z64
+*.n64
+*.v64
+baserom.*
+__pycache__/
+.venv/

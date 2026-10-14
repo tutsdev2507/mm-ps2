@@ -1,0 +1,35 @@
+name: ps2
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container:
+      image: ps2dev/ps2dev:latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Ensure make + git
+        run: apk add --no-cache make git >/dev/null 2>&1 || true
+
+      - name: Build gsKit (if missing)
+        run: |
+          if [ ! -d "$PS2DEV/gsKit/lib" ]; then
+            git clone --depth 1 https://github.com/ps2dev/gsKit.git /tmp/gsKit
+            make -C /tmp/gsKit -j"$(nproc)"
+            make -C /tmp/gsKit install
+          fi
+
+      - name: Build port
+        run: make -C port
+
+      - name: Upload ELF
+        uses: actions/upload-artifact@v4
+        with:
+          name: mm-ps2-elf
+          path: port/mm-ps2.elf
