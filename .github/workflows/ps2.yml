@@ -17,13 +17,19 @@ jobs:
       - name: Ensure make + git
         run: apk add --no-cache make git >/dev/null 2>&1 || true
 
+      - name: Locate gsKit
+        run: |
+          echo "PS2DEV=$PS2DEV PS2SDK=$PS2SDK"
+          find /usr/local/ps2dev -name 'libgsKit*' -o -name 'gsKit.h' 2>/dev/null || true
+
       - name: Build gsKit (if missing)
         run: |
-          if [ ! -d "$PS2DEV/gsKit/lib" ]; then
+          if ! find /usr/local/ps2dev -name 'libgsKit.a' | grep -q .; then
             git clone --depth 1 https://github.com/ps2dev/gsKit.git /tmp/gsKit
             make -C /tmp/gsKit -j"$(nproc)"
             make -C /tmp/gsKit install
           fi
+          find /usr/local/ps2dev -name 'libgsKit.a' 2>/dev/null
 
       - name: Build port
         run: make -C port
