@@ -64,10 +64,10 @@ back to a raw pointer for hand-built lists.
 - [x] **M0 — toolchain harness**: build a bootable PS2 ELF that inits gsKit and
       clears the screen. Proves the CI + gsKit pipeline.
 - [x] **M1 — assets**: extract assets from the user's USA 1.0 ROM with ZAPD.
-- [ ] **M2 — renderer**: F3DEX2 GBI display-list interpreter emitting `gsKit` prims.
+- [x] **M2 — renderer**: F3DEX2 GBI display-list interpreter emitting `gsKit` prims.
       Geometry, per-tile textures (RGBA/CI/IA/I, TLUT) and the colour combiner are
-      implemented; renders an animated textured 3D cube. *(in progress: real game
-      display lists still need M3)*
+      implemented. Renders an animated textured 3D cube and, via the integration
+      test, the real extracted `object_ah` display lists (textured, 8x8..32x32).
 - [ ] **M3 — boot**: libultra shim (threads, mesg queues, timers, VI swap) so
       `bootproc -> Main -> graph thread` runs and presents frames.
 - [ ] **M4 — input**: controller shim over `libpad` (PadMgr).
