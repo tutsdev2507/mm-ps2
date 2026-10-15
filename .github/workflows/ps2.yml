@@ -12,8 +12,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
       - name: Install 32-bit libc (for asset integration test)
-        run: sudo apt-get update && sudo apt-get install -y gcc-multilib libc6-dev-i386
+        run: sudo apt-get update && sudo apt-get install -y gcc-multilib libc6-dev-i386 gdb
       - name: Run interpreter tests
+        env:
+          MMPS2_GDB: "1"
         run: bash port/tests/run.sh
 
   build:
@@ -50,7 +52,7 @@ jobs:
           command -v ee-g++ || true
           command -v ee-c++ || true
           echo "--- try C++ compilers ---"
-          for cxx in ee-g++ ee-c++ mips64el-unknown-linux-gnu-g++ ee-gcc; do
+          for cxx in mips64r5900el-ps2-elf-g++ mips64r5900el-ps2-elf-c++ ee-g++ ee-c++; do
             command -v "$cxx" >/dev/null 2>&1 || continue
             for std in c++20 c++17 c++14 c++11; do
               echo "== $cxx -std=$std =="
