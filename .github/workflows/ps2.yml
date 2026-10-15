@@ -39,6 +39,9 @@ jobs:
       - name: Build port
         run: make -C port
 
+      - name: Build PS2 bring-up runtime (P0+P1)
+        run: make -C platform/ps2
+
       - name: Probe EE C++ toolchain
         continue-on-error: true
         run: |
@@ -94,4 +97,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: mm-ps2-elf
-          path: port/mm-ps2.elf
+          path: |
+            port/mm-ps2.elf
+            platform/ps2/mmps2-boot.elf
