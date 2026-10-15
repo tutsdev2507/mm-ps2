@@ -42,7 +42,7 @@ s32 osSendMesg(OSMesgQueue *mq, OSMesg msg, s32 flags)
             return -1;
         /* Blocking send to a full queue is not exercised yet. */
         while (mq_full(mq))
-            DelayThread(100);
+            ;
     }
 
     mq->msg[(mq->first + mq->validCount) % mq->msgCount] = msg;
@@ -57,7 +57,7 @@ s32 osJamMesg(OSMesgQueue *mq, OSMesg msg, s32 flags)
         if (flags == OS_MESG_NOBLOCK)
             return -1;
         while (mq_full(mq))
-            DelayThread(100);
+            ;
     }
 
     mq->first = (mq->first + mq->msgCount - 1) % mq->msgCount;
