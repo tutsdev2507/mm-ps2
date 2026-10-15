@@ -51,16 +51,25 @@ typedef struct {
     u32 tile[8];
     u32 tileSize[8];
 
+    // Per-tile decode (indexed by tile number 0..7). The render tile is 0.
+    u32 tileFmtT[8];   // G_SETTILE image format
+    u32 tileSizT[8];   // G_SETTILE image size
+    s32 tileLineT[8];  // G_SETTILE line (64-bit words per row)
+    s32 tileTmemT[8];  // G_SETTILE tmem address
+    s32 tileULS[8], tileULT[8], tileLRS[8], tileLRT[8]; // G_SETTILESIZE
+
     // Decoded texture state (captured from the command stream).
-    const void *texImg;   // last G_SETTIMG image pointer
-    u32 texImgW;          // last G_SETTIMG width field
-    u32 tileFmt;          // render-tile G_SETTILE image format
-    u32 tileSiz;          // render-tile G_SETTILE image size
-    const void *tlut;     // G_LOADTLUT palette pointer
-    u32 tlutCount;        // G_LOADTLUT entry count
-    u32 texW, texH;       // render-tile dimensions in texels
-    int tlutType;         // G_TT_* (from othermode H)
-    int filter;           // GS_FILTER_*
+    const void *texImg[8]; // per-tile G_SETTIMG image pointer
+    const void *texImgLoad;// last G_SETTIMG (used by the next LOADTLUT/LOADBLOCK)
+    u32 tlutLoadCount;     // G_LOADTLUT entry count for texImgLoad
+    const void *tlut;      // G_LOADTLUT palette pointer (for the render tile)
+    u32 tlutCount;         // G_LOADTLUT entry count
+    u32 tileFmt;           // render-tile G_SETTILE image format
+    u32 tileSiz;           // render-tile G_SETTILE image size
+    u32 texW, texH;        // render-tile dimensions in texels
+    u32 blkTexels;         // texels in the last G_LOADBLOCK (load tile)
+    int tlutType;          // G_TT_* (from othermode H)
+    int filter;            // GS_FILTER_*
 
     Mmps2TexEnt texCache[MMPS2_TEX_CACHE];
     int texCacheCount;
@@ -93,5 +102,21 @@ void mmps2_gfx_set_projection(Mmps2Gfx *g, const Mtx *m);
 // `dst` must hold w*h u32 values; `pal` is an RGBA16 palette for CI formats.
 void mmps2_tex_decode(u32 *dst, u32 fmt, u32 siz, u32 w, u32 h,
                       const void *src, const u16 *pal);
+
+// A colour as the RDP combiner works on it (8 bits per channel).
+typedef struct {
+    u8 r, g, b, a;
+} Mmps2Rgba;
+
+// Evaluate the recorded single/two-cycle combiner for the given per-vertex
+// inputs, returning the final shade colour. Texel inputs are per-pixel on real
+// hardware, so callers pass a representative texel (e.g. opaque white) when they
+// only need the vertex-side factor; the texture itself is still sampled by the
+// GS during rasterisation.
+Mmps2Rgba mmps2_combine(const Mmps2Gfx *g, Mmps2Rgba texel, Mmps2Rgba shade,
+                        Mmps2Rgba prim, Mmps2Rgba env);
+
+// True if the active combiner reads TEXEL0/TEXEL1 (i.e. texturing contributes).
+int mmps2_combiner_uses_texture(const Mmps2Gfx *g);
 
 #endif // MMPS2_GFX_H

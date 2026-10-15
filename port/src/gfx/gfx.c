@@ -128,6 +128,26 @@ static const void *resolve(const Mmps2Gfx *g, u32 w1)
     return (const void *)(uintptr_t)w1;
 }
 
+// --- Combiner word packing (matches the F3DEX2 G_SETCOMBINE encoding) ---
+// The F3DEX2 GBI packs a/b into 4 bits, c into 5 bits and d into 3 bits, and
+// `_SHIFTL` masks each field to its width. The decomp's G_CCMUX_0 (=31) therefore
+// truncates to 15 in a/b and 7 in d; the interpreter must invert that mapping.
+#define CSH(v, s, w) ((((u32)(v)) & ((1u << (w)) - 1u)) << (s))
+
+static u32 comb_w0(int a0, int c0, int Aa0, int Ac0, int a1, int c1)
+{
+    return CSH(a0, 20, 4) | CSH(c0, 15, 5) | CSH(Aa0, 12, 3) |
+           CSH(Ac0, 9, 3) | CSH(a1, 5, 4) | CSH(c1, 0, 5);
+}
+
+static u32 comb_w1(int b0, int b1, int Aa1, int Ac1, int d0,
+                   int Ab0, int Ad0, int d1, int Ab1, int Ad1)
+{
+    return CSH(b0, 28, 4) | CSH(b1, 24, 4) | CSH(Aa1, 21, 3) |
+           CSH(Ac1, 18, 3) | CSH(d0, 15, 3) | CSH(Ab0, 12, 3) |
+           CSH(Ad0, 9, 3) | CSH(d1, 6, 3) | CSH(Ab1, 3, 3) | CSH(Ad1, 0, 3);
+}
+
 void mmps2_gfx_init(Mmps2Gfx *g, GSGLOBAL *gs)
 {
     memset(g, 0, sizeof(*g));
@@ -141,6 +161,13 @@ void mmps2_gfx_init(Mmps2Gfx *g, GSGLOBAL *gs)
     g->filter = GS_FILTER_NEAREST;
     mmps2_mtx_identity(&g->proj[0]);
     mmps2_mtx_identity(&g->mv[0]);
+
+    // Default combiner is G_CC_MODULATEIA (TEXEL0 * SHADE) so geometry drawn
+    // before a G_SETCOMBINE still gets the conventional modulate behaviour.
+    g->combine_hi = comb_w0(G_CCMUX_TEXEL0, G_CCMUX_SHADE, G_ACMUX_TEXEL0,
+                            G_ACMUX_SHADE, G_CCMUX_0, G_CCMUX_0);
+    g->combine_lo = comb_w1(G_CCMUX_0, G_CCMUX_0, G_ACMUX_0, G_ACMUX_0, G_CCMUX_0,
+                            G_ACMUX_0, G_ACMUX_0, G_CCMUX_0, G_ACMUX_0, G_ACMUX_0);
 
     // Default viewport matching a y-down 640x448 surface in NDC.
     g->vp.vscale[0] = (s16)(gs->Width * 2);
@@ -265,10 +292,11 @@ void mmps2_tex_decode(u32 *dst, u32 fmt, u32 siz, u32 w, u32 h,
 
 static const GSTEXTURE *bind_texture(Mmps2Gfx *g)
 {
+    const void *img = g->texImg[G_TX_RENDERTILE];
     const u16 *pal = NULL;
     u32 i, w = g->texW, h = g->texH;
 
-    if (!g->texImg || w == 0 || h == 0)
+    if (!img || w == 0 || h == 0)
         return NULL;
     // Bail out on implausible tile dimensions rather than over-read the source.
     if (w > 1024 || h > 1024)
@@ -281,7 +309,7 @@ static const GSTEXTURE *bind_texture(Mmps2Gfx *g)
 
     for (i = 0; i < (u32)g->texCacheCount; i++) {
         Mmps2TexEnt *c = &g->texCache[i];
-        if (c->valid && c->img == g->texImg && c->tlut == g->tlut &&
+        if (c->valid && c->img == img && c->tlut == g->tlut &&
             c->fmt == g->tileFmt && c->siz == g->tileSiz &&
             c->w == w && c->h == h)
             return &c->tex;
@@ -291,7 +319,7 @@ static const GSTEXTURE *bind_texture(Mmps2Gfx *g)
 
     {
         Mmps2TexEnt *e = &g->texCache[g->texCacheCount++];
-        e->img = g->texImg;
+        e->img = img;
         e->tlut = g->tlut;
         e->fmt = (u8)g->tileFmt;
         e->siz = (u8)g->tileSiz;
@@ -303,7 +331,7 @@ static const GSTEXTURE *bind_texture(Mmps2Gfx *g)
             e->valid = 0;
             return NULL;
         }
-        mmps2_tex_decode((u32 *)e->mem, g->tileFmt, g->tileSiz, w, h, g->texImg, pal);
+        mmps2_tex_decode((u32 *)e->mem, g->tileFmt, g->tileSiz, w, h, img, pal);
 
         memset(&e->tex, 0, sizeof(e->tex));
         e->tex.Width = w;
@@ -321,27 +349,159 @@ static const GSTEXTURE *bind_texture(Mmps2Gfx *g)
     }
 }
 
-// Per-vertex colour: when lighting is on we don't evaluate the combiner, so fall
-// back to the primitive colour (white) rather than the raw normal in cn[].
-static u64 vertex_color(const Mmps2Gfx *g, const Vtx *v)
-{
-    u8 r, gr, b;
+// --- N64 color combiner -----------------------------------------------------
 
-    if ((g->geom & G_LIGHTING) ||
-        (v->cn[0] == 0 && v->cn[1] == 0 && v->cn[2] == 0)) {
-        // Lit geometry (cn[] holds the normal, not a colour) or unset vertex
-        // colours: fall back to the primitive colour.
-        r = g->r;
-        gr = g->g;
-        b = g->b;
-    } else {
-        r = v->cn[0];
-        gr = v->cn[1];
-        b = v->cn[2];
-    }
-    return GS_SETREG_RGBAQ(r, gr, b, 0xFF, 0);
+// One combiner channel: (A - B) * C + D, with the product scaled by 1/255.
+static u8 comb_chan(int a, int b, int c, int d)
+{
+    int t = (a - b) * c;
+    int v;
+    t = (t >= 0) ? (t + 127) / 255 : (t - 127) / 255;
+    v = t + d;
+    if (v < 0)
+        v = 0;
+    if (v > 255)
+        v = 255;
+    return (u8)v;
 }
 
+// Broadcast a scalar into an RGB triple.
+static void set_rgb(u8 out[3], u8 v)
+{
+    out[0] = out[1] = out[2] = v;
+}
+
+static void mux_rgb(int sel, int wide, const Mmps2Rgba *comb, const Mmps2Rgba *t0,
+                    const Mmps2Rgba *t1, const Mmps2Rgba *sh,
+                    const Mmps2Rgba *pr, const Mmps2Rgba *en, u8 out[3])
+{
+    // `wide` selects the 5-bit c field, where 7 means COMBINED_ALPHA. In the
+    // 4-bit a/b and 3-bit d fields, 7 is NOISE/0 and G_CCMUX_0 (31) truncates
+    // down to 15/7, both of which the RDP treats as a literal zero.
+    switch (sel) {
+    case G_CCMUX_COMBINED:      out[0] = comb->r; out[1] = comb->g; out[2] = comb->b; break;
+    case G_CCMUX_TEXEL0:        out[0] = t0->r; out[1] = t0->g; out[2] = t0->b; break;
+    case G_CCMUX_TEXEL1:        out[0] = t1->r; out[1] = t1->g; out[2] = t1->b; break;
+    case G_CCMUX_PRIMITIVE:     out[0] = pr->r; out[1] = pr->g; out[2] = pr->b; break;
+    case G_CCMUX_SHADE:         out[0] = sh->r; out[1] = sh->g; out[2] = sh->b; break;
+    case G_CCMUX_ENVIRONMENT:   out[0] = en->r; out[1] = en->g; out[2] = en->b; break;
+    case G_CCMUX_1:             set_rgb(out, 255); break;
+    case G_CCMUX_COMBINED_ALPHA:
+        if (wide)
+            set_rgb(out, comb->a);
+        else
+            set_rgb(out, 0);
+        break;
+    case G_CCMUX_TEXEL0_ALPHA:  set_rgb(out, t0->a); break;
+    case G_CCMUX_TEXEL1_ALPHA:  set_rgb(out, t1->a); break;
+    case G_CCMUX_PRIMITIVE_ALPHA:set_rgb(out, pr->a); break;
+    case G_CCMUX_SHADE_ALPHA:   set_rgb(out, sh->a); break;
+    case G_CCMUX_ENV_ALPHA:     set_rgb(out, en->a); break;
+    case G_CCMUX_LOD_FRACTION:
+    case G_CCMUX_PRIM_LOD_FRAC:
+    case G_CCMUX_0:
+    default:                    set_rgb(out, 0); break;
+    }
+}
+
+static u8 mux_alpha(int sel, const Mmps2Rgba *comb, const Mmps2Rgba *t0,
+                    const Mmps2Rgba *t1, const Mmps2Rgba *sh,
+                    const Mmps2Rgba *pr, const Mmps2Rgba *en)
+{
+    switch (sel) {
+    case G_ACMUX_COMBINED:   return comb->a;
+    case G_ACMUX_TEXEL0:     return t0->a;
+    case G_ACMUX_TEXEL1:     return t1->a;
+    case G_ACMUX_PRIMITIVE:  return pr->a;
+    case G_ACMUX_SHADE:      return sh->a;
+    case G_ACMUX_ENVIRONMENT:return en->a;
+    case G_ACMUX_1:          return 255;
+    case G_ACMUX_0:
+    default:                 return 0;
+    }
+}
+
+Mmps2Rgba mmps2_combine(const Mmps2Gfx *g, Mmps2Rgba texel, Mmps2Rgba shade,
+                        Mmps2Rgba prim, Mmps2Rgba env)
+{
+    Mmps2Rgba tex1 = texel; // no multi-texture: TEXEL1 falls back to TEXEL0
+    Mmps2Rgba comb = { 0, 0, 0, 0 };
+    u32 hi = g->combine_hi, lo = g->combine_lo;
+    int cyc = (g->othermode_h >> G_MDSFT_CYCLETYPE) & 3;
+    int i, ncyc = (cyc == G_CYC_2CYCLE) ? 2 : 1;
+
+    for (i = 0; i < ncyc; i++) {
+        int a, b, c, d, Aa, Ab, Ac, Ad;
+        u8 ar[3], br[3], cr[3], dr[3];
+
+        a  = (i == 0) ? ((hi >> 20) & 0xF) : ((hi >> 5) & 0xF);
+        c  = (i == 0) ? ((hi >> 15) & 0x1F) : (hi & 0x1F);
+        Aa = (i == 0) ? ((hi >> 12) & 0x7) : ((lo >> 21) & 0x7);
+        Ac = (i == 0) ? ((hi >> 9) & 0x7) : ((lo >> 18) & 0x7);
+        b  = (i == 0) ? ((lo >> 28) & 0xF) : ((lo >> 24) & 0xF);
+        d  = (i == 0) ? ((lo >> 15) & 0x7) : ((lo >> 6) & 0x7);
+        Ab = (i == 0) ? ((lo >> 12) & 0x7) : ((lo >> 3) & 0x7);
+        Ad = (i == 0) ? ((lo >> 9) & 0x7) : (lo & 0x7);
+
+        mux_rgb(a, 0, &comb, &texel, &tex1, &shade, &prim, &env, ar);
+        mux_rgb(b, 0, &comb, &texel, &tex1, &shade, &prim, &env, br);
+        mux_rgb(c, 1, &comb, &texel, &tex1, &shade, &prim, &env, cr);
+        mux_rgb(d, 0, &comb, &texel, &tex1, &shade, &prim, &env, dr);
+        comb.r = comb_chan(ar[0], br[0], cr[0], dr[0]);
+        comb.g = comb_chan(ar[1], br[1], cr[1], dr[1]);
+        comb.b = comb_chan(ar[2], br[2], cr[2], dr[2]);
+
+        comb.a = comb_chan(mux_alpha(Aa, &comb, &texel, &tex1, &shade, &prim, &env),
+                           mux_alpha(Ab, &comb, &texel, &tex1, &shade, &prim, &env),
+                           mux_alpha(Ac, &comb, &texel, &tex1, &shade, &prim, &env),
+                           mux_alpha(Ad, &comb, &texel, &tex1, &shade, &prim, &env));
+    }
+
+    return comb;
+}
+
+static int mux_is_texel(int sel)
+{
+    return sel == G_CCMUX_TEXEL0 || sel == G_CCMUX_TEXEL1 ||
+           sel == G_CCMUX_TEXEL0_ALPHA || sel == G_CCMUX_TEXEL1_ALPHA;
+}
+
+int mmps2_combiner_uses_texture(const Mmps2Gfx *g)
+{
+    u32 hi = g->combine_hi, lo = g->combine_lo;
+    int a0 = (hi >> 20) & 0xF, c0 = (hi >> 15) & 0x1F;
+    int Aa0 = (hi >> 12) & 0x7, Ac0 = (hi >> 9) & 0x7;
+    int a1 = (hi >> 5) & 0xF, c1 = hi & 0x1F;
+    int b0 = (lo >> 28) & 0xF, b1 = (lo >> 24) & 0xF;
+    int Aa1 = (lo >> 21) & 0x7, Ac1 = (lo >> 18) & 0x7;
+    int d0 = (lo >> 15) & 0x7, d1 = (lo >> 6) & 0x7;
+    int Ab0 = (lo >> 12) & 0x7, Ad0 = (lo >> 9) & 0x7;
+    int Ab1 = (lo >> 3) & 0x7, Ad1 = lo & 0x7;
+
+    return mux_is_texel(a0) || mux_is_texel(c0) ||
+           mux_is_texel(Aa0) || mux_is_texel(Ac0) ||
+           mux_is_texel(a1) || mux_is_texel(c1) ||
+           mux_is_texel(Aa1) || mux_is_texel(Ac1) ||
+           mux_is_texel(b0) || mux_is_texel(b1) ||
+           mux_is_texel(d0) || mux_is_texel(d1) ||
+           mux_is_texel(Ab0) || mux_is_texel(Ad0) ||
+           mux_is_texel(Ab1) || mux_is_texel(Ad1);
+}
+
+// Per-vertex shade colour fed to the GS. The N64 shade is the interpolated
+// vertex colour; for lit geometry the RSP would have applied lighting into it,
+// which we don't implement, so fall back to the primitive colour.
+static Mmps2Rgba vertex_shade(const Mmps2Gfx *g, const Vtx *v)
+{
+    Mmps2Rgba c;
+    if ((g->geom & G_LIGHTING) ||
+        (v->cn[0] == 0 && v->cn[1] == 0 && v->cn[2] == 0)) {
+        c.r = g->r; c.g = g->g; c.b = g->b; c.a = g->a;
+    } else {
+        c.r = v->cn[0]; c.g = v->cn[1]; c.b = v->cn[2]; c.a = v->cn[3];
+    }
+    return c;
+}
 static void emit_triangle(Mmps2Gfx *g, int a, int b, int c)
 {
     float ax, ay, bx, by, cx, cy;
@@ -349,6 +509,8 @@ static void emit_triangle(Mmps2Gfx *g, int a, int b, int c)
     const Vtx *va, *vb, *vc;
     u64 ca, cb, cc;
     const GSTEXTURE *tex;
+    Mmps2Rgba prim, env, white;
+    int wantTex;
 
     if (a < 0 || a >= MMPS2_VTX_MAX || b < 0 || b >= MMPS2_VTX_MAX ||
         c < 0 || c >= MMPS2_VTX_MAX)
@@ -362,11 +524,31 @@ static void emit_triangle(Mmps2Gfx *g, int a, int b, int c)
     xform(g, vb, &bx, &by, &bz);
     xform(g, vc, &cx, &cy, &cz);
 
-    ca = vertex_color(g, va);
-    cb = vertex_color(g, vb);
-    cc = vertex_color(g, vc);
+    prim.r = g->r; prim.g = g->g; prim.b = g->b; prim.a = g->a;
+    env.r = g->er; env.g = g->eg; env.b = g->eb; env.a = g->ea;
+    white.r = white.g = white.b = white.a = 0xFF;
 
-    tex = (g->texOn && g->texImg) ? bind_texture(g) : NULL;
+    // The RDP combiner mixes per-pixel texel with per-vertex shade/prim/env.
+    // gsKit samples the texture itself, so we evaluate the combiner with an
+    // opaque-white texel to obtain the vertex-side colour factor; the GS then
+    // multiplies it by the sampled texel during rasterisation.
+    wantTex = g->texOn && mmps2_combiner_uses_texture(g) &&
+              g->texImg[G_TX_RENDERTILE] != NULL;
+    tex = wantTex ? bind_texture(g) : NULL;
+    if (!tex)
+        wantTex = 0;
+
+    {
+        Mmps2Rgba sa = vertex_shade(g, va);
+        Mmps2Rgba sb = vertex_shade(g, vb);
+        Mmps2Rgba sc = vertex_shade(g, vc);
+        Mmps2Rgba ra = mmps2_combine(g, white, sa, prim, env);
+        Mmps2Rgba rb = mmps2_combine(g, white, sb, prim, env);
+        Mmps2Rgba rc = mmps2_combine(g, white, sc, prim, env);
+        ca = GS_SETREG_RGBAQ(ra.r, ra.g, ra.b, ra.a, 0);
+        cb = GS_SETREG_RGBAQ(rb.r, rb.g, rb.b, rb.a, 0);
+        cc = GS_SETREG_RGBAQ(rc.r, rc.g, rc.b, rc.a, 0);
+    }
 
     if (tex) {
         float sc = (float)g->texScale / (32.0f * 65536.0f);
@@ -611,35 +793,69 @@ static void run_dl(Mmps2Gfx *g, const Gfx *dl, int depth)
         case G_SETTILE: {
             u32 tile = (w1 >> 24) & 0x07;
             g->tile[tile] = w0;
+            g->tileFmtT[tile] = (w0 >> 21) & 0x07;
+            g->tileSizT[tile] = (w0 >> 19) & 0x03;
+            g->tileLineT[tile] = (s32)((w0 >> 9) & 0x1FF);
+            g->tileTmemT[tile] = (s32)(w0 & 0x1FF);
             if (tile == G_TX_RENDERTILE) {
-                g->tileFmt = (w0 >> 21) & 0x07;
-                g->tileSiz = (w0 >> 19) & 0x03;
+                g->tileFmt = g->tileFmtT[tile];
+                g->tileSiz = g->tileSizT[tile];
             }
             p++;
             break;
         }
 
-        case G_SETTILESIZE: {
+        case G_SETTILESIZE:
+        case G_LOADTILE: {
             u32 tile = (w1 >> 24) & 0x07;
+            s32 uls = (s32)((w0 >> 12) & 0xFFF), ult = (s32)(w0 & 0xFFF);
+            s32 lrs = (s32)((w1 >> 12) & 0xFFF), lrt = (s32)(w1 & 0xFFF);
             g->tileSize[tile] = w0;
+            g->tileULS[tile] = uls; g->tileULT[tile] = ult;
+            g->tileLRS[tile] = lrs; g->tileLRT[tile] = lrt;
             if (tile == G_TX_RENDERTILE) {
-                u32 uls = (w0 >> 12) & 0xFFF, ult = w0 & 0xFFF;
-                u32 lrs = (w1 >> 12) & 0xFFF, lrt = w1 & 0xFFF;
-                g->texW = (lrs >= uls) ? ((lrs - uls) >> 2) + 1 : 0;
-                g->texH = (lrt >= ult) ? ((lrt - ult) >> 2) + 1 : 0;
+                g->texW = (lrs >= uls) ? (u32)(((lrs - uls) >> 2) + 1) : 0;
+                g->texH = (lrt >= ult) ? (u32)(((lrt - ult) >> 2) + 1) : 0;
+            }
+            p++;
+            break;
+        }
+
+        case G_LOADBLOCK: {
+            // w1 = |tile:3| 000| lrs(texels-1):12 | dxt:12|
+            u32 tile = (w1 >> 24) & 0x07;
+            u32 lrs = (w1 >> 12) & 0xFFF;
+            u32 dxt = w1 & 0xFFF;
+            if (tile == G_TX_LOADTILE) {
+                g->blkTexels = lrs + 1;
+                if (dxt == 0 && g->texW == 0 && g->tileLineT[G_TX_RENDERTILE] > 0) {
+                    // No G_SETTILESIZE was emitted (hand-written texture load):
+                    // infer the width from the render tile line (64-bit words).
+                    int bits = 4 << g->tileSizT[G_TX_RENDERTILE];
+                    u32 row = (u32)g->tileLineT[G_TX_RENDERTILE];
+                    u32 texels = g->blkTexels;
+                    if (g->tileSizT[G_TX_RENDERTILE] == G_IM_SIZ_4b)
+                        texels *= 2; // loaded as 8b
+                    if (bits >= 4 && row > 0 && (row * 64u) / (u32)bits > 0) {
+                        g->texW = (row * 64u) / (u32)bits;
+                        g->texH = (g->texW > 0) ? texels / g->texW : 0;
+                    }
+                }
             }
             p++;
             break;
         }
 
         case G_SETTIMG:
-            g->texImg = resolve(g, w1);
+            g->texImgLoad = resolve(g, w1);
+            g->texImg[G_TX_RENDERTILE] = g->texImgLoad;
             p++;
             break;
 
         case G_LOADTLUT:
-            g->tlut = g->texImg;
+            g->tlut = g->texImgLoad;
             g->tlutCount = ((w1 >> 14) & 0x3FF) + 1;
+            g->tlutLoadCount = g->tlutCount;
             p++;
             break;
 

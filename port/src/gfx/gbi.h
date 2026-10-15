@@ -157,6 +157,53 @@ typedef struct {
 #define G_TT_RGBA16      2
 #define G_TT_IA16        3
 
+// --- Othermode sub-fields (H) ---
+#define G_MDSFT_CYCLETYPE   20
+#define G_CYC_1CYCLE        0
+#define G_CYC_2CYCLE        1
+#define G_CYC_COPY          2
+#define G_CYC_FILL          3
+
+// --- Othermode sub-fields (L) ---
+#define G_MDSFT_ALPHACOMPARE 0
+#define G_AC_NONE            0
+#define G_AC_THRESHOLD       1
+#define G_AC_DITHER          3
+
+// --- Color combiner MUX selectors (CC / AC) ---
+#define G_CCMUX_COMBINED        0
+#define G_CCMUX_TEXEL0          1
+#define G_CCMUX_TEXEL1          2
+#define G_CCMUX_PRIMITIVE       3
+#define G_CCMUX_SHADE           4
+#define G_CCMUX_ENVIRONMENT     5
+#define G_CCMUX_CENTER          6
+#define G_CCMUX_SCALE           6
+#define G_CCMUX_COMBINED_ALPHA  7
+#define G_CCMUX_TEXEL0_ALPHA    8
+#define G_CCMUX_TEXEL1_ALPHA    9
+#define G_CCMUX_PRIMITIVE_ALPHA 10
+#define G_CCMUX_SHADE_ALPHA     11
+#define G_CCMUX_ENV_ALPHA       12
+#define G_CCMUX_LOD_FRACTION    13
+#define G_CCMUX_PRIM_LOD_FRAC   14
+#define G_CCMUX_NOISE           7
+#define G_CCMUX_K4              7
+#define G_CCMUX_K5              15
+#define G_CCMUX_1               6
+#define G_CCMUX_0               31
+
+#define G_ACMUX_COMBINED        0
+#define G_ACMUX_TEXEL0          1
+#define G_ACMUX_TEXEL1          2
+#define G_ACMUX_PRIMITIVE       3
+#define G_ACMUX_SHADE           4
+#define G_ACMUX_ENVIRONMENT     5
+#define G_ACMUX_LOD_FRACTION    0
+#define G_ACMUX_PRIM_LOD_FRAC   6
+#define G_ACMUX_1               6
+#define G_ACMUX_0               7
+
 #define G_ON   1
 #define G_OFF  0
 
@@ -315,6 +362,25 @@ typedef struct {
         (_SHIFTL(G_TEXTURE, 24, 8) | _SHIFTL(BOWTIE_VAL, 16, 8) |               \
          _SHIFTL((level), 11, 3) | _SHIFTL((tile), 8, 3) | _SHIFTL((on), 1, 7)), \
         (_SHIFTL((s), 16, 16) | _SHIFTL((t), 0, 16))                            \
+    })
+
+// --- Color combiner authoring (same packing as the decomp's F3DEX2 macros) ---
+#define __GCCc0w0(a, c, Aa, Ac) \
+    (_SHIFTL((a), 20, 4) | _SHIFTL((c), 15, 5) | _SHIFTL((Aa), 12, 3) | _SHIFTL((Ac), 9, 3))
+#define __GCCc1w0(a, c) (_SHIFTL((a), 5, 4) | _SHIFTL((c), 0, 5))
+#define __GCCc0w1(b, d, Ab, Ad) \
+    (_SHIFTL((b), 28, 4) | _SHIFTL((d), 15, 3) | _SHIFTL((Ab), 12, 3) | _SHIFTL((Ad), 9, 3))
+#define __GCCc1w1(b, Aa, Ac, d, Ab, Ad)                                          \
+    (_SHIFTL((b), 24, 4) | _SHIFTL((Aa), 21, 3) | _SHIFTL((Ac), 18, 3) |         \
+     _SHIFTL((d), 6, 3) | _SHIFTL((Ab), 3, 3) | _SHIFTL((Ad), 0, 3))
+
+#define gsDPSetCombineLERP(a0, b0, c0, d0, Aa0, Ab0, Ac0, Ad0,                   \
+                           a1, b1, c1, d1, Aa1, Ab1, Ac1, Ad1)                   \
+    ((Gfx){                                                                      \
+        (_SHIFTL(G_SETCOMBINE, 24, 8) |                                          \
+         ((__GCCc0w0(a0, c0, Aa0, Ac0) | __GCCc1w0(a1, c1)) & 0x00FFFFFFu)),     \
+        (u32)(__GCCc0w1(b0, d0, Ab0, Ad0) |                                      \
+              __GCCc1w1(b1, Aa1, Ac1, d1, Ab1, Ad1))                             \
     })
 
 #endif // MMPS2_GBI_H

@@ -47,8 +47,14 @@ The game emits **F3DEX2 / F3DZEX2** display lists (`-DF3DEX_GBI_2`, which also d
 `w0`/`w1` for `G_TRI2`/`G_QUAD`). `port/src/gfx/gfx.c` walks a list and emits gsKit
 primitives. Implemented: `G_MTX`/`G_POPMTX` (proj + modelview stacks), `G_VTX`/
 `G_MODIFYVTX`, `G_TRI1`/`G_TRI2`/`G_QUAD`, `G_DL`/`G_ENDDL`, `G_MOVEMEM` (viewport),
-`G_MOVEWORD` (`G_MW_SEGMENT`/`G_MW_PERSPNORM`), colors, `G_GEOMETRYMODE`, and texture /
-combiner state (recorded, not yet rasterised). Unknown commands are no-ops so lists run.
+`G_MOVEWORD` (`G_MW_SEGMENT`/`G_MW_PERSPNORM`), colors, `G_GEOMETRYMODE`, and the
+N64 colour combiner (`G_SETCOMBINE`, 1- and 2-cycle, evaluated per vertex with an
+opaque-white texel; the GS then multiplies by the sampled texel).
+
+Textures are decoded to a 32-bit surface on first use and uploaded through gsKit:
+RGBA16/32, CI4/8 (with the loaded TLUT) and IA/I, with dimensions taken from
+`G_SETTILESIZE` or inferred from `G_LOADBLOCK` + the render tile line. Tile state is
+tracked per tile descriptor. Unknown commands are no-ops so lists run.
 
 Addresses in `w1` are resolved through the 16-entry segment table (`gsSPSegment`), falling
 back to a raw pointer for hand-built lists.
@@ -59,9 +65,9 @@ back to a raw pointer for hand-built lists.
       clears the screen. Proves the CI + gsKit pipeline.
 - [x] **M1 — assets**: extract assets from the user's USA 1.0 ROM with ZAPD.
 - [ ] **M2 — renderer**: F3DEX2 GBI display-list interpreter emitting `gsKit` prims.
-      Now renders an animated 3D cube (modelview rotation + perspective + Z-buffer).
-      *(in progress: geometry path done; textures/combiner pending, real game DLs
-      need M3)*
+      Geometry, per-tile textures (RGBA/CI/IA/I, TLUT) and the colour combiner are
+      implemented; renders an animated textured 3D cube. *(in progress: real game
+      display lists still need M3)*
 - [ ] **M3 — boot**: libultra shim (threads, mesg queues, timers, VI swap) so
       `bootproc -> Main -> graph thread` runs and presents frames.
 - [ ] **M4 — input**: controller shim over `libpad` (PadMgr).

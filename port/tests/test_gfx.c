@@ -31,6 +31,7 @@ static int g_ntris = 0;
 typedef struct {
     float u1, v1, u2, v2, u3, v3;
     const GSTEXTURE *tex;
+    u64 color;
 } TT;
 
 static TT g_ttris[MAX_TTRI];
@@ -59,11 +60,12 @@ void gsKit_prim_triangle_goraud_texture_3d(GSGLOBAL *g, GSTEXTURE *Texture,
 {
     (void)g; (void)z1; (void)z2; (void)z3;
     (void)x1; (void)y1; (void)x2; (void)y2; (void)x3; (void)y3;
-    (void)color1; (void)color2; (void)color3;
+    (void)color2; (void)color3;
     if (g_nttris < MAX_TTRI) {
         TT *t = &g_ttris[g_nttris++];
         t->u1 = u1; t->v1 = v1; t->u2 = u2; t->v2 = v2; t->u3 = u3; t->v3 = v3;
         t->tex = Texture;
+        t->color = color1;
     }
 }
 
@@ -390,6 +392,189 @@ int main(void)
         check(g_uploads == 1, "texture uploaded once");
         check(g_ttris[0].tex != NULL, "texture bound");
         check(g_ttris[0].tex->PSM == GS_PSM_CT32, "uploaded as CT32");
+    }
+
+    // 14. Combiner: G_CC_MODULATEIA with an opaque-white texel reduces to SHADE.
+    {
+        Vtx *v = (Vtx *)VERTS;
+        Gfx *dl = (Gfx *)DL;
+        fill_quad(v);
+        for (i = 0; i < 4; i++) {
+            v[i].cn[0] = 100; v[i].cn[1] = 150; v[i].cn[2] = 200; v[i].cn[3] = 255;
+        }
+        i = 0;
+        dl[i++] = gsSPMatrix((Mtx *)PROJ, G_MTX_PROJECTION | G_MTX_LOAD | G_MTX_NOPUSH);
+        dl[i++] = gsSPSetGeometryMode(G_SHADE); // not lit
+        dl[i++] = gsDPSetCombineLERP(G_CCMUX_TEXEL0, G_CCMUX_0, G_CCMUX_SHADE, G_CCMUX_0,
+                                     G_ACMUX_TEXEL0, G_ACMUX_0, G_ACMUX_SHADE, G_ACMUX_0,
+                                     G_CCMUX_TEXEL0, G_CCMUX_0, G_CCMUX_SHADE, G_CCMUX_0,
+                                     G_ACMUX_TEXEL0, G_ACMUX_0, G_ACMUX_SHADE, G_ACMUX_0);
+        dl[i++] = gsSPVertex(v, 4, 0);
+        dl[i++] = gsSP1Triangle(0, 1, 2, 0);
+        dl[i++] = gsSPEndDisplayList();
+        g_ntris = 0;
+        mmps2_gfx_init(&g, &g_gs);
+        mmps2_gfx_run(&g, dl);
+        printf("14. Combiner MODULATEIA (texel=white)\n");
+        check(g_ntris == 1, "1 triangle emitted");
+        check(g_tris[0].color == 0xFFC89664ull, "result == shade (100,150,200)");
+    }
+
+    // 15. Combiner: pure SHADE (no texture anywhere).
+    {
+        Vtx *v = (Vtx *)VERTS;
+        Gfx *dl = (Gfx *)DL;
+        fill_quad(v);
+        for (i = 0; i < 4; i++) {
+            v[i].cn[0] = 10; v[i].cn[1] = 20; v[i].cn[2] = 30; v[i].cn[3] = 255;
+        }
+        i = 0;
+        dl[i++] = gsSPMatrix((Mtx *)PROJ, G_MTX_PROJECTION | G_MTX_LOAD | G_MTX_NOPUSH);
+        dl[i++] = gsDPSetCombineLERP(G_CCMUX_0, G_CCMUX_0, G_CCMUX_0, G_CCMUX_SHADE,
+                                     G_ACMUX_0, G_ACMUX_0, G_ACMUX_0, G_ACMUX_SHADE,
+                                     G_CCMUX_0, G_CCMUX_0, G_CCMUX_0, G_CCMUX_SHADE,
+                                     G_ACMUX_0, G_ACMUX_0, G_ACMUX_0, G_ACMUX_SHADE);
+        dl[i++] = gsSPVertex(v, 4, 0);
+        dl[i++] = gsSP1Triangle(0, 1, 2, 0);
+        dl[i++] = gsSPEndDisplayList();
+        g_ntris = 0;
+        mmps2_gfx_init(&g, &g_gs);
+        mmps2_gfx_run(&g, dl);
+        printf("15. Combiner SHADE only\n");
+        check(g_ntris == 1, "1 triangle emitted");
+        check(!mmps2_combiner_uses_texture(&g), "combiner does not reference texels");
+        check(g_tris[0].color == 0xFF1E140Aull, "result == shade (10,20,30)");
+    }
+
+    // 16. Combiner: pure PRIMITIVE.
+    {
+        Vtx *v = (Vtx *)VERTS;
+        Gfx *dl = (Gfx *)DL;
+        fill_quad(v);
+        for (i = 0; i < 4; i++) {
+            v[i].cn[0] = 1; v[i].cn[1] = 2; v[i].cn[2] = 3; v[i].cn[3] = 255;
+        }
+        i = 0;
+        dl[i++] = gsSPMatrix((Mtx *)PROJ, G_MTX_PROJECTION | G_MTX_LOAD | G_MTX_NOPUSH);
+        dl[i++] = gsDPSetCombineLERP(G_CCMUX_0, G_CCMUX_0, G_CCMUX_0, G_CCMUX_PRIMITIVE,
+                                     G_ACMUX_0, G_ACMUX_0, G_ACMUX_0, G_ACMUX_PRIMITIVE,
+                                     G_CCMUX_0, G_CCMUX_0, G_CCMUX_0, G_CCMUX_PRIMITIVE,
+                                     G_ACMUX_0, G_ACMUX_0, G_ACMUX_0, G_ACMUX_PRIMITIVE);
+        dl[i++] = gsDPSetPrimColor(0, 0, 200, 100, 50, 255);
+        dl[i++] = gsSPVertex(v, 4, 0);
+        dl[i++] = gsSP1Triangle(0, 1, 2, 0);
+        dl[i++] = gsSPEndDisplayList();
+        g_ntris = 0;
+        mmps2_gfx_init(&g, &g_gs);
+        mmps2_gfx_run(&g, dl);
+        printf("16. Combiner PRIMITIVE only\n");
+        check(g_ntris == 1, "1 triangle emitted");
+        check(g_tris[0].color == 0xFF3264C8ull, "result == prim (200,100,50)");
+    }
+
+    // 17. Combiner references TEXEL0 -> texturing is active.
+    {
+        u8 *img = (u8 *)IMG;
+        Vtx *v = (Vtx *)VERTS;
+        Gfx *dl = (Gfx *)DL;
+        fill_quad(v);
+        memset(img, 0xFF, 256);
+        i = 0;
+        dl[i++] = gsSPMatrix((Mtx *)PROJ, G_MTX_PROJECTION | G_MTX_LOAD | G_MTX_NOPUSH);
+        dl[i++] = (Gfx){ _SHIFTL(G_SETTIMG, 24, 8) | _SHIFTL(0, 21, 3) |
+                         _SHIFTL(2, 19, 2), (u32)IMG };
+        dl[i++] = (Gfx){ _SHIFTL(G_SETTILE, 24, 8) | _SHIFTL(0, 21, 3) |
+                         _SHIFTL(2, 19, 2), _SHIFTL(0, 24, 3) };
+        dl[i++] = (Gfx){ _SHIFTL(G_SETTILESIZE, 24, 8),
+                         _SHIFTL(0, 24, 3) | _SHIFTL(15 * 4, 12, 12) |
+                         _SHIFTL(15 * 4, 0, 12) };
+        dl[i++] = gsDPSetCombineLERP(G_CCMUX_0, G_CCMUX_0, G_CCMUX_0, G_CCMUX_TEXEL0,
+                                     G_ACMUX_0, G_ACMUX_0, G_ACMUX_0, G_ACMUX_TEXEL0,
+                                     G_CCMUX_0, G_CCMUX_0, G_CCMUX_0, G_CCMUX_TEXEL0,
+                                     G_ACMUX_0, G_ACMUX_0, G_ACMUX_0, G_ACMUX_TEXEL0);
+        dl[i++] = gsSPTexture(0xFFFF, 0xFFFF, 0, 0, G_ON);
+        dl[i++] = gsSPVertex(v, 4, 0);
+        dl[i++] = gsSP1Triangle(0, 1, 2, 0);
+        dl[i++] = gsSPEndDisplayList();
+        g_ntris = 0; g_nttris = 0; g_uploads = 0;
+        mmps2_gfx_init(&g, &g_gs);
+        mmps2_gfx_run(&g, dl);
+        printf("17. Combiner TEXEL0 -> textured path\n");
+        check(mmps2_combiner_uses_texture(&g), "combiner references TEXEL0");
+        check(g_nttris == 1, "textured triangle emitted");
+        check(g_ttris[0].color == 0xFFFFFFFFull, "texel=white -> vertex factor white");
+    }
+
+    // 18. Texture dimensions derived from G_SETTILESIZE (render tile).
+    {
+        u16 *pal = (u16 *)PAL;
+        u8 *img = (u8 *)IMG;
+        Gfx *dl = (Gfx *)DL;
+        memset(pal, 0, 512);
+        memset(img, 1, 64);
+        i = 0;
+        dl[i++] = (Gfx){ _SHIFTL(G_SETTIMG, 24, 8) | _SHIFTL(0, 21, 3) |
+                         _SHIFTL(2, 19, 2), (u32)PAL };
+        dl[i++] = (Gfx){ _SHIFTL(G_SETTILE, 24, 8) | _SHIFTL(256, 0, 9), _SHIFTL(7, 24, 3) };
+        dl[i++] = (Gfx){ _SHIFTL(G_LOADTLUT, 24, 8),
+                         _SHIFTL(7, 24, 3) | _SHIFTL(255, 14, 10) };
+        dl[i++] = (Gfx){ _SHIFTL(G_SETTIMG, 24, 8) | _SHIFTL(2, 21, 3) |
+                         _SHIFTL(1, 19, 2), (u32)IMG };
+        dl[i++] = (Gfx){ _SHIFTL(G_SETTILE, 24, 8) | _SHIFTL(2, 21, 3) |
+                         _SHIFTL(1, 19, 2), _SHIFTL(0, 24, 3) };
+        dl[i++] = (Gfx){ _SHIFTL(G_SETTILESIZE, 24, 8),
+                         _SHIFTL(0, 24, 3) | _SHIFTL(7 * 4, 12, 12) | _SHIFTL(7 * 4, 0, 12) };
+        dl[i++] = gsSPEndDisplayList();
+        mmps2_gfx_init(&g, &g_gs);
+        mmps2_gfx_run(&g, dl);
+        printf("18. Texture dims from SETTILESIZE\n");
+        check(g.texW == 8 && g.texH == 8, "8x8 from tile size");
+    }
+
+    // 19. Texture dims inferred from G_LOADBLOCK + render-tile line.
+    {
+        Gfx *dl = (Gfx *)DL;
+        i = 0;
+        // 16b RGBA 8x8: render tile line = ((8*2)+7)>>3 = 2.
+        dl[i++] = (Gfx){ _SHIFTL(G_SETTIMG, 24, 8) | _SHIFTL(0, 21, 3) |
+                         _SHIFTL(2, 19, 2), (u32)IMG };
+        dl[i++] = (Gfx){ _SHIFTL(G_SETTILE, 24, 8) | _SHIFTL(0, 21, 3) |
+                         _SHIFTL(2, 19, 2) | _SHIFTL(2, 9, 9), _SHIFTL(0, 24, 3) };
+        dl[i++] = (Gfx){ _SHIFTL(G_LOADBLOCK, 24, 8),
+                         _SHIFTL(7, 24, 3) | _SHIFTL(8 * 8 - 1, 12, 12) };
+        dl[i++] = gsSPEndDisplayList();
+        mmps2_gfx_init(&g, &g_gs);
+        mmps2_gfx_run(&g, dl);
+        printf("19. Texture dims from LOADBLOCK fallback\n");
+        check(g.texW == 8 && g.texH == 8, "8x8 inferred");
+    }
+
+    // 20. Two-cycle combiner: MODULATEIA twice scales shade by itself.
+    {
+        Vtx *v = (Vtx *)VERTS;
+        Gfx *dl = (Gfx *)DL;
+        fill_quad(v);
+        for (i = 0; i < 4; i++) {
+            v[i].cn[0] = 128; v[i].cn[1] = 128; v[i].cn[2] = 128; v[i].cn[3] = 255;
+        }
+        i = 0;
+        dl[i++] = gsSPMatrix((Mtx *)PROJ, G_MTX_PROJECTION | G_MTX_LOAD | G_MTX_NOPUSH);
+        // cycle 0: TEXEL0*SHADE, cycle 1: COMBINED*SHADE
+        dl[i++] = gsDPSetCombineLERP(G_CCMUX_TEXEL0, G_CCMUX_0, G_CCMUX_SHADE, G_CCMUX_0,
+                                     G_ACMUX_TEXEL0, G_ACMUX_0, G_ACMUX_SHADE, G_ACMUX_0,
+                                     G_CCMUX_COMBINED, G_CCMUX_0, G_CCMUX_SHADE, G_CCMUX_0,
+                                     G_ACMUX_COMBINED, G_ACMUX_0, G_ACMUX_SHADE, G_ACMUX_0);
+        dl[i++] = gsSPVertex(v, 4, 0);
+        dl[i++] = gsSP1Triangle(0, 1, 2, 0);
+        dl[i++] = gsSPEndDisplayList();
+        g_ntris = 0;
+        mmps2_gfx_init(&g, &g_gs);
+        g.othermode_h |= (u32)(G_CYC_2CYCLE << G_MDSFT_CYCLETYPE);
+        mmps2_gfx_run(&g, dl);
+        printf("20. Two-cycle combiner\n");
+        check(g_ntris == 1, "1 triangle emitted");
+        // 128 -> 128*128/255 = 64
+        check(g_tris[0].color == 0xFF404040ull, "shade squared == 64");
     }
 
     printf("\n%s (%d tri captures)\n", g_fail ? "FAILURES" : "ALL PASSED", g_ntris);
