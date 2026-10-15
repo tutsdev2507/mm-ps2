@@ -520,9 +520,12 @@ static void emit_triangle(Mmps2Gfx *g, int a, int b, int c)
     vb = &g->vtx[b];
     vc = &g->vtx[c];
 
-    xform(g, va, &ax, &ay, &az);
-    xform(g, vb, &bx, &by, &bz);
-    xform(g, vc, &cx, &cy, &cz);
+    // Positions were captured when the vertices were loaded (the RSP does the
+    // vertex transform on G_VTX), so a triangle can mix batches loaded under
+    // different matrices — which is how flexible skeletons skin a joint.
+    ax = g->sx[a]; ay = g->sy[a]; az = g->sz[a];
+    bx = g->sx[b]; by = g->sy[b]; bz = g->sz[b];
+    cx = g->sx[c]; cy = g->sy[c]; cz = g->sz[c];
 
     prim.r = g->r; prim.g = g->g; prim.b = g->b; prim.a = g->a;
     env.r = g->er; env.g = g->eg; env.b = g->eb; env.a = g->ea;
@@ -608,8 +611,16 @@ static void run_dl(Mmps2Gfx *g, const Gfx *dl, int depth)
             int i;
             if (src) {
                 for (i = 0; i < n && base + i < MMPS2_VTX_MAX; i++) {
-                    if (base + i >= 0)
+                    if (base + i >= 0) {
                         g->vtx[base + i] = src[i];
+                        // The RSP transforms a vertex when it loads it, so the
+                        // matrix in effect here is what positions this vertex.
+                        // Flexible skeletons rely on it: they swap limb
+                        // matrices between vertex batches and then mix the
+                        // batches inside a single triangle group.
+                        xform(g, &g->vtx[base + i], &g->sx[base + i],
+                              &g->sy[base + i], &g->sz[base + i]);
+                    }
                 }
                 if (base + n > g->nvtx && base + n <= MMPS2_VTX_MAX)
                     g->nvtx = base + n;
@@ -622,8 +633,10 @@ static void run_dl(Mmps2Gfx *g, const Gfx *dl, int depth)
             // w0 = |cmd|where:8|00000000|vtx*2:16|, w1 = value
             int where = (int)((w0 >> 16) & 0xFF);
             int idx = (int)(w0 & 0xFFFF) / 2;
-            if (where == G_MWO_POINT_ZSCREEN && idx >= 0 && idx < MMPS2_VTX_MAX)
+            if (where == G_MWO_POINT_ZSCREEN && idx >= 0 && idx < MMPS2_VTX_MAX) {
                 g->vtx[idx].ob[2] = (s16)w1;
+                xform(g, &g->vtx[idx], &g->sx[idx], &g->sy[idx], &g->sz[idx]);
+            }
             p++;
             break;
         }

@@ -28,6 +28,15 @@ typedef struct {
     Vtx vtx[MMPS2_VTX_MAX];
     int nvtx;
 
+    // Screen-space result of transforming vtx[i], captured when G_VTX loads the
+    // vertex (the N64 RSP transforms a vertex on load). A flexible skeleton's
+    // display list swaps limb matrices between vertex batches, then draws one
+    // triangle group mixing those batches, so each vertex keeps the matrix it
+    // was loaded under rather than the matrix active at draw time.
+    float sx[MMPS2_VTX_MAX];
+    float sy[MMPS2_VTX_MAX];
+    int sz[MMPS2_VTX_MAX];
+
     Mtx proj[MMPS2_MTX_STACK];
     int projTop;
     Mtx mv[MMPS2_MTX_STACK];

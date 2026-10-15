@@ -243,7 +243,10 @@ int main(void)
         check(g.geom == G_LIGHTING, "clear-then-set");
     }
 
-    // 7. Modelview push/pop: second triangle is drawn untranslated.
+    // 7. Vertices transform on load: the modelview in effect at gsSPVertex is
+    //    what positions them (the RSP transforms a vertex when it loads it), so
+    //    loading under the pushed matrix and again after the pop gives +100
+    //    then identity for the same source vertices.
     {
         Mtx *mv = (Mtx *)MV;
         Gfx *dl = (Gfx *)DL;
@@ -252,19 +255,20 @@ int main(void)
         mv->fracPart[0][3] = 0x0000;
         i = 0;
         dl[i++] = gsSPMatrix((Mtx *)PROJ, G_MTX_PROJECTION | G_MTX_LOAD | G_MTX_NOPUSH);
-        dl[i++] = gsSPVertex((Vtx *)VERTS, 4, 0);
         dl[i++] = gsSPMatrix(mv, G_MTX_MODELVIEW | G_MTX_LOAD | G_MTX_PUSH);
+        dl[i++] = gsSPVertex((Vtx *)VERTS, 4, 0);
         dl[i++] = gsSP1Triangle(0, 1, 2, 0);
         dl[i++] = gsSPPopMatrix(1);
+        dl[i++] = gsSPVertex((Vtx *)VERTS, 4, 0);
         dl[i++] = gsSP1Triangle(0, 1, 2, 0);
         dl[i++] = gsSPEndDisplayList();
         g_ntris = 0;
         mmps2_gfx_init(&g, &g_gs);
         mmps2_gfx_run(&g, dl);
-        printf("7. Modelview push/pop\n");
+        printf("7. Vertices transform on load (modelview push/pop)\n");
         check(g_ntris == 2, "2 triangles emitted");
-        check(near(g_tris[0].x1, 320.2f), "pushed matrix translates +100px");
-        check(near(g_tris[1].x1, 220.2f), "pop restores identity");
+        check(near(g_tris[0].x1, 320.2f), "loaded under pushed matrix +100px");
+        check(near(g_tris[1].x1, 220.2f), "reloaded under identity after pop");
     }
 
     // 8. Perspective: a point on the view axis projects to screen centre.
@@ -575,6 +579,35 @@ int main(void)
         check(g_ntris == 1, "1 triangle emitted");
         // 128 -> 128*128/255 = 64
         check(g_tris[0].color == 0xFF404040ull, "shade squared == 64");
+    }
+
+    // 21. Flexible skeleton skinning: a display list loads one vertex batch
+    //     under limb matrix A, then swaps to limb matrix B, loads a second
+    //     batch, and finally draws a triangle mixing both batches. Each vertex
+    //     must keep the matrix it was loaded under (the N64 RSP transforms on
+    //     G_VTX); transforming at draw time would push the first batch under B
+    //     as well and tear the mesh apart at the joint.
+    {
+        Mtx *mv = (Mtx *)MV;
+        Vtx *v = (Vtx *)VERTS;
+        Gfx *dl = (Gfx *)DL;
+        fill_quad(v); // v0 (220,140) v1 (420,140) v2 (420,300) v3 (220,300)
+        base_proj(); // an earlier test overwrote the projection buffer
+        mmps2_mtx_translate(mv, 100.0f, 0.0f, 0.0f); // limb matrix B
+        i = 0;
+        dl[i++] = gsSPMatrix((Mtx *)PROJ, G_MTX_PROJECTION | G_MTX_LOAD | G_MTX_NOPUSH);
+        dl[i++] = gsSPVertex(v, 2, 0); // batch A: v0,v1 under identity (matrix A)
+        dl[i++] = gsSPMatrix(mv, G_MTX_MODELVIEW | G_MTX_LOAD | G_MTX_NOPUSH);
+        dl[i++] = gsSPVertex(v + 2, 2, 2); // batch B: v2,v3 under +100 (matrix B)
+        dl[i++] = gsSP1Triangle(0, 1, 2, 0); // mixes batch A (0,1) with batch B (2)
+        dl[i++] = gsSPEndDisplayList();
+        g_ntris = 0;
+        mmps2_gfx_init(&g, &g_gs);
+        mmps2_gfx_run(&g, dl);
+        printf("21. Flexible-skeleton skinning (matrix swap between batches)\n");
+        check(g_ntris == 1, "1 triangle emitted");
+        check(near(g_tris[0].x1, 220.2f), "batch A keeps matrix A (no +100 shift)");
+        check(near(g_tris[0].x3, 520.2f), "batch B uses matrix B (+100 shift)");
     }
 
     printf("\n%s (%d tri captures)\n", g_fail ? "FAILURES" : "ALL PASSED", g_ntris);
