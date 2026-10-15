@@ -11,6 +11,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+      - name: Install 32-bit libc (for asset integration test)
+        run: sudo apt-get update && sudo apt-get install -y gcc-multilib libc6-dev-i386
       - name: Run interpreter tests
         run: bash port/tests/run.sh
 
@@ -36,6 +38,17 @@ jobs:
 
       - name: Build port
         run: make -C port
+
+      - name: Probe EE C++ toolchain
+        continue-on-error: true
+        run: |
+          for std in c++20 c++17 c++14 c++11; do
+            echo "== trying -std=$std =="
+            if ee-g++ -std=$std -O2 platform/ps2/probe.cpp -o /tmp/probe_ee -lm; then
+              echo "OK: -std=$std builds"
+              break
+            fi
+          done
 
       - name: Upload ELF
         uses: actions/upload-artifact@v4

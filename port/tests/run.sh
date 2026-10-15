@@ -16,3 +16,15 @@ trap 'rm -rf "$out"' EXIT
     "$here/test_gfx.c" "$src/gfx/gfx.c" -lm -o "$out/test_gfx"
 
 "$out/test_gfx"
+
+# Integration test against the real extracted object_ah asset. It needs 32-bit
+# pointers, so it is only built where -m32 links+runs (CI, x86-64 multilib).
+if "$CC" -m32 -x c - -o "$out/probe" >/dev/null 2>&1 <<<'int main(void){return 0;}'; then
+    "$CC" -m32 -std=gnu89 -O1 -w \
+        -I "$here/stub" -I "$src" -I "$src/gfx" -I "$src/../assets/object_ah" \
+        "$here/test_object_ah.c" "$src/gfx/gfx.c" \
+        "$src/../assets/object_ah/object_ah.c" -lm -o "$out/test_object_ah"
+    "$out/test_object_ah"
+else
+    echo "-- skipping object_ah integration test (-m32 unavailable)"
+fi
