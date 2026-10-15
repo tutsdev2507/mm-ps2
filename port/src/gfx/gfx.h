@@ -10,6 +10,19 @@
 #define MMPS2_VTX_MAX 64
 #define MMPS2_MTX_STACK 8
 #define MMPS2_SEG_MAX 16
+#define MMPS2_TEX_CACHE 32
+
+// A decoded texture uploaded to GS VRAM once and reused across frames.
+typedef struct {
+    u8 valid;
+    const void *img;
+    const void *tlut;
+    u8 fmt;
+    u8 siz;
+    u32 w, h;
+    u8 *mem;          // EE-side decoded pixels (gsKit_texture_size bytes)
+    GSTEXTURE tex;    // uploaded gsKit texture
+} Mmps2TexEnt;
 
 typedef struct {
     Vtx vtx[MMPS2_VTX_MAX];
@@ -37,7 +50,20 @@ typedef struct {
     u32 combine_lo;
     u32 tile[8];
     u32 tileSize[8];
-    u32 texImg;
+
+    // Decoded texture state (captured from the command stream).
+    const void *texImg;   // last G_SETTIMG image pointer
+    u32 texImgW;          // last G_SETTIMG width field
+    u32 tileFmt;          // render-tile G_SETTILE image format
+    u32 tileSiz;          // render-tile G_SETTILE image size
+    const void *tlut;     // G_LOADTLUT palette pointer
+    u32 tlutCount;        // G_LOADTLUT entry count
+    u32 texW, texH;       // render-tile dimensions in texels
+    int tlutType;         // G_TT_* (from othermode H)
+    int filter;           // GS_FILTER_*
+
+    Mmps2TexEnt texCache[MMPS2_TEX_CACHE];
+    int texCacheCount;
     int texLevel;
     int texOn;
     s32 texScale;
@@ -58,5 +84,14 @@ void mmps2_mtx_perspective(Mtx *m, float fovy, float aspect, float near, float f
 void mmps2_mtx_translate(Mtx *m, float x, float y, float z);
 void mmps2_mtx_rotate_x(Mtx *m, float rad);
 void mmps2_mtx_rotate_y(Mtx *m, float rad);
+
+// Pose the interpreter from outside (skeleton limbs) and set the camera.
+void mmps2_gfx_set_modelview(Mmps2Gfx *g, const Mtx *m);
+void mmps2_gfx_set_projection(Mmps2Gfx *g, const Mtx *m);
+
+// Decode an N64 texture into a 32-bit RGBA (PS2 PSMCT32, A8B8G8R8) buffer.
+// `dst` must hold w*h u32 values; `pal` is an RGBA16 palette for CI formats.
+void mmps2_tex_decode(u32 *dst, u32 fmt, u32 siz, u32 w, u32 h,
+                      const void *src, const u16 *pal);
 
 #endif // MMPS2_GFX_H

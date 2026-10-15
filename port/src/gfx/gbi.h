@@ -135,6 +135,69 @@ typedef struct {
 #define G_TEXTURE_GEN       0x00040000
 #define G_TEXTURE_GEN_LINEAR 0x00080000
 
+// --- Image formats / sizes (N64) ---
+#define G_IM_FMT_RGBA 0
+#define G_IM_FMT_YUV  1
+#define G_IM_FMT_CI   2
+#define G_IM_FMT_IA   3
+#define G_IM_FMT_I    4
+
+#define G_IM_SIZ_4b   0
+#define G_IM_SIZ_8b   1
+#define G_IM_SIZ_16b  2
+#define G_IM_SIZ_32b  3
+
+// --- Tiles / othermode bitfields we care about ---
+#define G_TX_RENDERTILE  0
+#define G_TX_LOADTILE    7
+
+#define G_MDSFT_TEXTLUT  14
+#define G_MDSFT_TEXTFILT 12
+#define G_TT_NONE        0
+#define G_TT_RGBA16      2
+#define G_TT_IA16        3
+
+#define G_ON   1
+#define G_OFF  0
+
+// --- Asset-side types (layout-compatible with the N64 libultra originals) so
+// the vendored extracted assets can be referenced from the port. ---
+typedef struct {
+    s16 x, y, z;
+} Vec3s;
+
+typedef struct {
+    u16 x, y, z;
+} JointIndex;
+
+typedef struct {
+    s16 frameCount;
+} AnimationHeaderCommon;
+
+typedef struct {
+    AnimationHeaderCommon common;
+    s16 *frameData;
+    JointIndex *jointIndices;
+    u16 staticIndexMax;
+} AnimationHeader;
+
+typedef struct {
+    Vec3s jointPos;
+    u8 child;
+    u8 sibling;
+    Gfx *dList;
+} StandardLimb;
+
+typedef struct {
+    void **segment;
+    u8 limbCount;
+} SkeletonHeader;
+
+typedef struct {
+    SkeletonHeader sh;
+    u8 dListCount;
+} FlexSkeletonHeader;
+
 // --- Authoring macros (subset; produce the same words as the decomp's
 // F3DEX_GBI_2 macros, which also define F3DEX_GBI, so triangle indices are
 // packed with the flag-railroads and *2 scaling). They expand to compound

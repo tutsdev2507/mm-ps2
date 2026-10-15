@@ -14,6 +14,33 @@ typedef struct {
     int PSMZ;
 } GSGLOBAL;
 
+typedef struct gsTexture {
+    u32 Width;
+    u32 Height;
+    u8 PSM;
+    u8 ClutPSM;
+    u32 TBW;
+    u32 *Mem;
+    u32 *Clut;
+    u32 Vram;
+    u32 VramClut;
+    u32 Filter;
+    u8 ClutStorageMode;
+    u8 Delayed;
+} GSTEXTURE;
+
+#define GS_PSM_CT32 0x00
+#define GS_PSM_CT24 0x01
+#define GS_PSM_CT16 0x02
+#define GS_PSM_T8   0x13
+#define GS_PSM_T4   0x14
+
+#define GS_FILTER_NEAREST 0x00
+#define GS_FILTER_LINEAR  0x01
+
+#define GSKIT_ALLOC_SYSBUFFER  0x00
+#define GSKIT_ALLOC_USERBUFFER 0x01
+
 #define GS_MODE_NTSC 0
 #define GS_INTERLACED 0
 #define GS_FIELD 0
@@ -36,5 +63,15 @@ void gsKit_prim_triangle_3d(GSGLOBAL *g,
                             float x1, float y1, int iz1,
                             float x2, float y2, int iz2,
                             float x3, float y3, int iz3, u64 color);
+
+void gsKit_prim_triangle_goraud_texture_3d(GSGLOBAL *g, GSTEXTURE *Texture,
+                            float x1, float y1, int iz1, float u1, float v1,
+                            float x2, float y2, int iz2, float u2, float v2,
+                            float x3, float y3, int iz3, float u3, float v3,
+                            u64 color1, u64 color2, u64 color3);
+
+int gsKit_texture_size(int width, int height, u32 psm);
+u32 gsKit_vram_alloc(GSGLOBAL *g, u32 bytes, u8 type);
+void gsKit_texture_upload(GSGLOBAL *g, GSTEXTURE *Texture);
 
 #endif // STUB_GSKIT_H

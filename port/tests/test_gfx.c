@@ -26,6 +26,17 @@ typedef struct {
 static Tri g_tris[MAX_TRI];
 static int g_ntris = 0;
 
+// --- capture emitted textured triangles ----------------------------------
+#define MAX_TTRI 8
+typedef struct {
+    float u1, v1, u2, v2, u3, v3;
+    const GSTEXTURE *tex;
+} TT;
+
+static TT g_ttris[MAX_TTRI];
+static int g_nttris = 0;
+static int g_uploads = 0;
+
 void gsKit_prim_triangle_3d(GSGLOBAL *g, float x1, float y1, int z1,
                             float x2, float y2, int z2,
                             float x3, float y3, int z3, u64 color)
@@ -39,6 +50,41 @@ void gsKit_prim_triangle_3d(GSGLOBAL *g, float x1, float y1, int z1,
         g_ntris++;
     }
 }
+
+void gsKit_prim_triangle_goraud_texture_3d(GSGLOBAL *g, GSTEXTURE *Texture,
+                            float x1, float y1, int z1, float u1, float v1,
+                            float x2, float y2, int z2, float u2, float v2,
+                            float x3, float y3, int z3, float u3, float v3,
+                            u64 color1, u64 color2, u64 color3)
+{
+    (void)g; (void)z1; (void)z2; (void)z3;
+    (void)x1; (void)y1; (void)x2; (void)y2; (void)x3; (void)y3;
+    (void)color1; (void)color2; (void)color3;
+    if (g_nttris < MAX_TTRI) {
+        TT *t = &g_ttris[g_nttris++];
+        t->u1 = u1; t->v1 = v1; t->u2 = u2; t->v2 = v2; t->u3 = u3; t->v3 = v3;
+        t->tex = Texture;
+    }
+}
+
+int gsKit_texture_size(int width, int height, u32 psm)
+{
+    (void)psm;
+    return width * height * 4;
+}
+
+u32 gsKit_vram_alloc(GSGLOBAL *g, u32 bytes, u8 type)
+{
+    (void)g; (void)bytes; (void)type;
+    return 0x1000;
+}
+
+void gsKit_texture_upload(GSGLOBAL *g, GSTEXTURE *Texture)
+{
+    (void)g; (void)Texture;
+    g_uploads++;
+}
+
 
 static int g_fail = 0;
 static void check(int cond, const char *what)
@@ -56,6 +102,8 @@ static int near(float a, float b) { float d = a - b; return d < 0.5f && d > -0.5
 #define MV     (BASE + 0x3000)
 #define DL     (BASE + 0x4000)
 #define VP     (BASE + 0x6000)
+#define PAL    (BASE + 0x8000)
+#define IMG    (BASE + 0x9000)
 
 static void fill_quad(Vtx *v)
 {
@@ -259,6 +307,90 @@ int main(void)
         check(ok, "R * I == R");
     }
 
+    // 10. Texture decode: RGBA16 (R5G5B5A1) -> CT32 (A8B8G8R8).
+    {
+        u16 src[4] = { 0xFFFF, 0x0001, 0xF800, 0x07C0 };
+        u32 dst[4];
+        mmps2_tex_decode(dst, G_IM_FMT_RGBA, G_IM_SIZ_16b, 2, 2, src, NULL);
+        printf("10. RGBA16 decode\n");
+        check(dst[0] == 0xFFFFFFFFu, "white");
+        check(dst[1] == 0xFF000000u, "opaque black");
+        check(dst[2] == 0x000000FFu, "pure red, transparent");
+        check(dst[3] == 0x0000FF00u, "pure green");
+    }
+
+    // 11. Texture decode: CI8 through an RGBA16 palette.
+    {
+        u16 pal[256];
+        u8 src[4] = { 0, 1, 2, 0 };
+        u32 dst[4];
+        memset(pal, 0, sizeof(pal));
+        pal[1] = 0xF800; // red
+        pal[2] = 0x003F; // opaque blue
+        mmps2_tex_decode(dst, G_IM_FMT_CI, G_IM_SIZ_8b, 4, 1, src, pal);
+        printf("11. CI8 decode\n");
+        check(dst[0] == 0x00000000u, "index 0 (transparent)");
+        check(dst[1] == 0x000000FFu, "index 1 -> red");
+        check(dst[2] == 0xFFFF0000u, "index 2 -> opaque blue");
+    }
+
+    // 12. Texture decode: IA16 and I8 grayscale.
+    {
+        u16 ia[2] = { 0xFF80, 0x0080 };
+        u8 i8[2] = { 0x80, 0x00 };
+        u32 dst[2];
+        mmps2_tex_decode(dst, G_IM_FMT_IA, G_IM_SIZ_16b, 2, 1, ia, NULL);
+        printf("12. IA/I decode\n");
+        check(dst[0] == 0x80FFFFFFu, "IA16 white, alpha 128");
+        mmps2_tex_decode(dst, G_IM_FMT_I, G_IM_SIZ_8b, 2, 1, i8, NULL);
+        check(dst[0] == 0xFF808080u, "I8 grey 128 opaque");
+        check(dst[1] == 0xFF000000u, "I8 black opaque");
+    }
+
+    // 13. Textured triangle: CI8 tile state drives an upload + textured draw.
+    {
+        u16 *pal = (u16 *)PAL;
+        u8 *img = (u8 *)IMG;
+        Vtx *v = (Vtx *)VERTS;
+        Gfx *dl = (Gfx *)DL;
+        memset(pal, 0, 512);
+        pal[1] = 0xF800;
+        memset(img, 1, 256);
+
+        i = 0;
+        dl[i++] = gsSPMatrix((Mtx *)PROJ, G_MTX_PROJECTION | G_MTX_LOAD | G_MTX_NOPUSH);
+        // palette: SETTIMG(RGBA/16b/w=1) + SETTILE(load tile 7) + LOADTLUT(256)
+        dl[i++] = (Gfx){ _SHIFTL(G_SETTIMG, 24, 8) | _SHIFTL(0, 21, 3) |
+                         _SHIFTL(2, 19, 2), (u32)PAL };
+        dl[i++] = (Gfx){ _SHIFTL(G_SETTILE, 24, 8) | _SHIFTL(256, 0, 9),
+                         _SHIFTL(7, 24, 3) };
+        dl[i++] = (Gfx){ _SHIFTL(G_LOADTLUT, 24, 8),
+                         _SHIFTL(7, 24, 3) | _SHIFTL(255, 14, 10) };
+        // CI8 image: SETTIMG(CI/8b) + SETTILE(render tile 0) + SETTILESIZE
+        dl[i++] = (Gfx){ _SHIFTL(G_SETTIMG, 24, 8) | _SHIFTL(2, 21, 3) |
+                         _SHIFTL(1, 19, 2), (u32)IMG };
+        dl[i++] = (Gfx){ _SHIFTL(G_SETTILE, 24, 8) | _SHIFTL(2, 21, 3) |
+                         _SHIFTL(1, 19, 2), _SHIFTL(0, 24, 3) };
+        dl[i++] = (Gfx){ _SHIFTL(G_SETTILESIZE, 24, 8),
+                         _SHIFTL(0, 24, 3) | _SHIFTL(15 * 4, 12, 12) |
+                         _SHIFTL(15 * 4, 0, 12) };
+        dl[i++] = gsSPTexture(0xFFFF, 0xFFFF, 0, 0, G_ON);
+        dl[i++] = gsSPSetGeometryMode(G_SHADE);
+        dl[i++] = gsSPVertex(v, 4, 0);
+        dl[i++] = gsSP1Triangle(0, 1, 2, 0);
+        dl[i++] = gsSPEndDisplayList();
+
+        g_ntris = 0;
+        g_nttris = 0;
+        g_uploads = 0;
+        mmps2_gfx_init(&g, &g_gs);
+        mmps2_gfx_run(&g, dl);
+        printf("13. Textured triangle\n");
+        check(g_nttris == 1, "1 textured triangle emitted");
+        check(g_uploads == 1, "texture uploaded once");
+        check(g_ttris[0].tex != NULL, "texture bound");
+        check(g_ttris[0].tex->PSM == GS_PSM_CT32, "uploaded as CT32");
+    }
+
     printf("\n%s (%d tri captures)\n", g_fail ? "FAILURES" : "ALL PASSED", g_ntris);
-    return g_fail;
-}
+    return g_fail;}

@@ -1,11 +1,12 @@
-// mm-ps2 M2 demo: boot the EE, initialise gsKit, and render an animated 3D
-// cube through the port's F3DEX2 GBI interpreter (port/src/gfx). This exercises
-// the full transform chain real display lists need: modelview (rotation) ->
-// projection (perspective) -> viewport -> perspective divide -> GS triangle.
+// mm-ps2 M2.5 demo: render an actor extracted from Majora's Mask (object_ah)
+// through the port's F3DEX2 GBI interpreter (port/src/gfx). The skeleton is
+// posed here (static T-pose) and each limb's display list is run with an
+// externally-computed modelview, so the actor's own per-limb matrix table
+// (segment 0x0D) is bypassed.
 //
-// It is a *renderer* demo, not the game yet: the game still needs the libultra
-// shim (M3), the asset loader and the graph/audio threads before anything from
-// Majora's Mask itself can run.
+// This is still a *renderer* demo: the game needs the libultra shim (M3), the
+// asset loader and the graph/audio threads before anything from Majora's Mask
+// itself can run.
 
 #include <tamtypes.h>
 #include <kernel.h>
@@ -15,85 +16,48 @@
 #include <gsToolkit.h>
 
 #include "gfx/gfx.h"
+#include "object_ah.h"
 
-#define CUBE_FRAMES 100000
+#define FRAMES 100000
 
-static Vtx s_cube[8] __attribute__((aligned(16)));
 static Mtx s_proj __attribute__((aligned(16)));
-static Mtx s_mv __attribute__((aligned(16)));
-static Mtx s_rotX __attribute__((aligned(16)));
-static Mtx s_rotY __attribute__((aligned(16)));
+static Mtx s_view __attribute__((aligned(16)));
+static Mtx s_rot __attribute__((aligned(16)));
 static Mtx s_tmp __attribute__((aligned(16)));
-static Gfx s_dl[64];
 
-// Six faces, each two triangles, with a distinct colour. No culling is enabled
-// so winding does not matter for visibility; the Z-buffer resolves overlaps.
-static const int s_faces[6][4] = {
-    { 4, 5, 6, 7 }, // +z
-    { 1, 0, 3, 2 }, // -z
-    { 0, 4, 7, 3 }, // -x
-    { 5, 1, 2, 6 }, // +x
-    { 7, 6, 2, 3 }, // +y
-    { 0, 1, 5, 4 }, // -y
-};
-static const u8 s_facecol[6][3] = {
-    { 0xFF, 0x40, 0x40 }, { 0x40, 0xFF, 0x40 }, { 0x40, 0x40, 0xFF },
-    { 0xFF, 0xFF, 0x40 }, { 0xFF, 0x40, 0xFF }, { 0x40, 0xFF, 0xFF },
-};
-
-static void build_vbo(void)
+// Walk the limb tree, accumulating jointPos translations, and run each limb's
+// display list with the resulting bone matrix (times the camera view).
+static void draw_limb(Mmps2Gfx *gfx, void **seg, int index, const Mtx *parent, int depth)
 {
-    static const s16 v[8][3] = {
-        { -1, -1, -1 }, { 1, -1, -1 }, { 1, 1, -1 }, { -1, 1, -1 },
-        { -1, -1, 1 },  { 1, -1, 1 },  { 1, 1, 1 },  { -1, 1, 1 },
-    };
-    int i;
-    for (i = 0; i < 8; i++) {
-        s_cube[i].ob[0] = v[i][0];
-        s_cube[i].ob[1] = v[i][1];
-        s_cube[i].ob[2] = v[i][2];
-        s_cube[i].flag = 0;
-        s_cube[i].tc[0] = s_cube[i].tc[1] = 0;
-        s_cube[i].cn[0] = s_cube[i].cn[1] = s_cube[i].cn[2] = 0xFF;
-        s_cube[i].cn[3] = 0x00;
+    const StandardLimb *limb;
+    Mtx local, tmp, mv;
+
+    if (index == 0xFF || depth > 32)
+        return;
+
+    limb = (const StandardLimb *)seg[index];
+
+    mmps2_mtx_translate(&tmp, (float)limb->jointPos.x,
+                        (float)limb->jointPos.y, (float)limb->jointPos.z);
+    mmps2_mtx_multiply(&local, parent, &tmp);
+
+    if (limb->dList != NULL) {
+        mmps2_mtx_multiply(&mv, &s_view, &local);
+        mmps2_gfx_set_modelview(gfx, &mv);
+        mmps2_gfx_run(gfx, limb->dList);
     }
-}
 
-static void build_scene(void)
-{
-    int i = 0, f;
-
-    // Camera: 45 degree perspective, cube sits at z = -4 in view space.
-    mmps2_mtx_perspective(&s_proj, 45.0f * 3.14159265f / 180.0f,
-                          640.0f / 448.0f, 1.0f, 100.0f);
-
-    s_dl[i++] = gsSPMatrix(&s_proj, G_MTX_PROJECTION | G_MTX_LOAD | G_MTX_NOPUSH);
-    s_dl[i++] = gsSPMatrix(&s_mv, G_MTX_MODELVIEW | G_MTX_LOAD | G_MTX_NOPUSH);
-    s_dl[i++] = gsSPVertex(s_cube, 8, 0);
-    for (f = 0; f < 6; f++) {
-        const int *q = s_faces[f];
-        s_dl[i++] = gsDPSetPrimColor(0, 0, s_facecol[f][0], s_facecol[f][1],
-                                     s_facecol[f][2], 0xFF);
-        s_dl[i++] = gsSP1Triangle(q[0], q[1], q[2], 0);
-        s_dl[i++] = gsSP1Triangle(q[0], q[2], q[3], 0);
-    }
-    s_dl[i++] = gsSPEndDisplayList();
-}
-
-// view = translate(0,0,-4) * rotateX * rotateY
-static void update_modelview(float t)
-{
-    mmps2_mtx_rotate_x(&s_rotX, t * 0.7f);
-    mmps2_mtx_rotate_y(&s_rotY, t * 1.1f);
-    mmps2_mtx_multiply(&s_tmp, &s_rotX, &s_rotY);
-    mmps2_mtx_translate(&s_mv, 0.0f, 0.0f, -4.0f);
-    mmps2_mtx_multiply(&s_mv, &s_mv, &s_tmp);
+    if (limb->child != 0xFF)
+        draw_limb(gfx, seg, limb->child, &local, depth + 1);
+    if (limb->sibling != 0xFF)
+        draw_limb(gfx, seg, limb->sibling, parent, depth + 1);
 }
 
 int main(int argc, char *argv[])
 {
     GSGLOBAL *gsGlobal;
     Mmps2Gfx gfx;
+    void **limbs;
     int frame;
 
     (void)argc;
@@ -117,18 +81,29 @@ int main(int argc, char *argv[])
     gsKit_mode_switch(gsGlobal, GS_ONESHOT);
 
     mmps2_gfx_init(&gfx, gsGlobal);
-    build_vbo();
-    build_scene();
 
-    for (frame = 0; frame < CUBE_FRAMES; frame++) {
-        update_modelview(frame * 0.03f);
-        gsKit_clear(gsGlobal, GS_SETREG_RGBAQ(0x10, 0x10, 0x20, 0x80, 0x00));
-        mmps2_gfx_run(&gfx, s_dl);
+    mmps2_mtx_perspective(&s_proj, 45.0f * 3.14159265f / 180.0f,
+                          640.0f / 448.0f, 10.0f, 20000.0f);
+    mmps2_gfx_set_projection(&gfx, &s_proj);
+
+    limbs = object_ah_Skel_009E70.sh.segment;
+
+    for (frame = 0; frame < FRAMES; frame++) {
+        Mtx ident;
+
+        mmps2_mtx_identity(&ident);
+        mmps2_mtx_rotate_y(&s_rot, (float)frame * 0.01f);
+        mmps2_mtx_translate(&s_view, 0.0f, -1300.0f, -6000.0f);
+        mmps2_mtx_multiply(&s_view, &s_view, &s_rot);
+
+        gsKit_clear(gsGlobal, GS_SETREG_RGBAQ(0x20, 0x30, 0x50, 0x80, 0));
+
+        draw_limb(&gfx, limbs, 0, &ident, 0);
+
         gsKit_queue_exec(gsGlobal);
         gsKit_sync_flip(gsGlobal);
     }
 
     gsKit_deinit_global(gsGlobal);
-    SleepThread();
     return 0;
 }

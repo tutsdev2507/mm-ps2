@@ -7,6 +7,7 @@
 // triangles, colors); textured/combiner commands are recorded but not yet
 // rasterised, and unknown commands are no-ops so lists still "run".
 #include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
 #include <math.h>
 #include <gsKit.h>
@@ -128,6 +129,8 @@ void mmps2_gfx_init(Mmps2Gfx *g, GSGLOBAL *gs)
     g->r = g->g = g->b = 0xFF;
     g->a = 0x80;
     g->ea = 0xFF;
+    g->texScale = 0x10000;
+    g->filter = GS_FILTER_NEAREST;
     mmps2_mtx_identity(&g->proj[0]);
     mmps2_mtx_identity(&g->mv[0]);
 
@@ -168,23 +171,215 @@ static void xform(const Mmps2Gfx *g, const Vtx *v, float *sx, float *sy, int *iz
     *iz = (int)((cz * invw * 0.5f + 0.5f) * 0x3FFFFF);
 }
 
+static void emit_triangle(Mmps2Gfx *g, int a, int b, int c);
+
+// --- Texture decoding -------------------------------------------------------
+
+static u32 expand5(u32 v)
+{
+    return (v << 3) | (v >> 2);
+}
+
+// N64 RGBA16 (R5G5B5A1) -> PS2 CT32 (A8B8G8R8, little-endian byte order A,B,G,R).
+static u32 rgba16_to_ct32(u16 v)
+{
+    u32 r = expand5((v >> 11) & 0x1F);
+    u32 g = expand5((v >> 6) & 0x1F);
+    u32 b = expand5((v >> 1) & 0x1F);
+    u32 a = (v & 1) ? 0xFFu : 0x00u;
+    return (a << 24) | (b << 16) | (g << 8) | r;
+}
+
+static u32 gray_to_ct32(u32 i, u32 a)
+{
+    return (a << 24) | (i << 16) | (i << 8) | i;
+}
+
+void mmps2_tex_decode(u32 *dst, u32 fmt, u32 siz, u32 w, u32 h,
+                      const void *src, const u16 *pal)
+{
+    u32 n = w * h;
+    u32 i;
+
+    switch (fmt) {
+    case G_IM_FMT_RGBA: {
+        const u16 *s = (const u16 *)src;
+        for (i = 0; i < n; i++)
+            dst[i] = rgba16_to_ct32(s[i]);
+        break;
+    }
+    case G_IM_FMT_CI: {
+        const u8 *s = (const u8 *)src;
+        if (siz == G_IM_SIZ_4b) {
+            for (i = 0; i < n; i++) {
+                u32 idx = (i & 1) ? (s[i >> 1] & 0x0F) : (s[i >> 1] >> 4);
+                dst[i] = pal ? rgba16_to_ct32(pal[idx]) : gray_to_ct32(idx * 17, 0xFF);
+            }
+        } else {
+            for (i = 0; i < n; i++) {
+                u32 idx = s[i];
+                dst[i] = pal ? rgba16_to_ct32(pal[idx]) : gray_to_ct32(idx, 0xFF);
+            }
+        }
+        break;
+    }
+    case G_IM_FMT_IA: {
+        if (siz == G_IM_SIZ_16b) {
+            const u16 *s = (const u16 *)src;
+            for (i = 0; i < n; i++)
+                dst[i] = gray_to_ct32((s[i] >> 8) & 0xFF, s[i] & 0xFF);
+        } else {
+            const u8 *s = (const u8 *)src;
+            for (i = 0; i < n; i++)
+                dst[i] = gray_to_ct32(((s[i] >> 4) & 0xF) * 17, (s[i] & 0xF) * 17);
+        }
+        break;
+    }
+    case G_IM_FMT_I:
+    default: {
+        const u8 *s = (const u8 *)src;
+        if (siz == G_IM_SIZ_4b) {
+            for (i = 0; i < n; i++) {
+                u32 idx = (i & 1) ? (s[i >> 1] & 0x0F) : (s[i >> 1] >> 4);
+                dst[i] = gray_to_ct32(idx * 17, 0xFF);
+            }
+        } else {
+            for (i = 0; i < n; i++)
+                dst[i] = gray_to_ct32(s[i], 0xFF);
+        }
+        break;
+    }
+    }
+}
+
+static const GSTEXTURE *bind_texture(Mmps2Gfx *g)
+{
+    const u16 *pal = NULL;
+    u32 i, w = g->texW, h = g->texH;
+
+    if (!g->texImg || w == 0 || h == 0)
+        return NULL;
+    if (g->tileFmt == G_IM_FMT_CI && g->tlut) {
+        if (g->tlutCount < 256)
+            return NULL;
+        pal = (const u16 *)g->tlut;
+    }
+
+    for (i = 0; i < (u32)g->texCacheCount; i++) {
+        Mmps2TexEnt *c = &g->texCache[i];
+        if (c->valid && c->img == g->texImg && c->tlut == g->tlut &&
+            c->fmt == g->tileFmt && c->siz == g->tileSiz &&
+            c->w == w && c->h == h)
+            return &c->tex;
+    }
+    if (g->texCacheCount >= MMPS2_TEX_CACHE)
+        return NULL;
+
+    {
+        Mmps2TexEnt *e = &g->texCache[g->texCacheCount++];
+        e->img = g->texImg;
+        e->tlut = g->tlut;
+        e->fmt = (u8)g->tileFmt;
+        e->siz = (u8)g->tileSiz;
+        e->w = w;
+        e->h = h;
+
+        e->mem = (u8 *)malloc(w * h * 4);
+        if (!e->mem) {
+            e->valid = 0;
+            return NULL;
+        }
+        mmps2_tex_decode((u32 *)e->mem, g->tileFmt, g->tileSiz, w, h, g->texImg, pal);
+
+        memset(&e->tex, 0, sizeof(e->tex));
+        e->tex.Width = w;
+        e->tex.Height = h;
+        e->tex.PSM = GS_PSM_CT32;
+        e->tex.ClutPSM = GS_PSM_CT16;
+        e->tex.Mem = (u32 *)e->mem;
+        e->tex.Filter = (u8)g->filter;
+        e->tex.Vram = gsKit_vram_alloc(g->gs, gsKit_texture_size(w, (int)h, GS_PSM_CT32),
+                                       GSKIT_ALLOC_USERBUFFER);
+        e->tex.VramClut = 0;
+        gsKit_texture_upload(g->gs, &e->tex);
+        e->valid = 1;
+        return &e->tex;
+    }
+}
+
+// Per-vertex colour: when lighting is on we don't evaluate the combiner, so fall
+// back to the primitive colour (white) rather than the raw normal in cn[].
+static u64 vertex_color(const Mmps2Gfx *g, const Vtx *v)
+{
+    u8 r, gr, b;
+
+    if ((g->geom & G_LIGHTING) ||
+        (v->cn[0] == 0 && v->cn[1] == 0 && v->cn[2] == 0)) {
+        // Lit geometry (cn[] holds the normal, not a colour) or unset vertex
+        // colours: fall back to the primitive colour.
+        r = g->r;
+        gr = g->g;
+        b = g->b;
+    } else {
+        r = v->cn[0];
+        gr = v->cn[1];
+        b = v->cn[2];
+    }
+    return GS_SETREG_RGBAQ(r, gr, b, 0xFF, 0);
+}
+
 static void emit_triangle(Mmps2Gfx *g, int a, int b, int c)
 {
     float ax, ay, bx, by, cx, cy;
     int az, bz, cz;
-    u64 color;
+    const Vtx *va, *vb, *vc;
+    u64 ca, cb, cc;
+    const GSTEXTURE *tex;
 
     if (a < 0 || a >= MMPS2_VTX_MAX || b < 0 || b >= MMPS2_VTX_MAX ||
         c < 0 || c >= MMPS2_VTX_MAX)
         return;
 
-    xform(g, &g->vtx[a], &ax, &ay, &az);
-    xform(g, &g->vtx[b], &bx, &by, &bz);
-    xform(g, &g->vtx[c], &cx, &cy, &cz);
+    va = &g->vtx[a];
+    vb = &g->vtx[b];
+    vc = &g->vtx[c];
 
-    color = GS_SETREG_RGBAQ(g->r, g->g, g->b, g->a, 0);
-    gsKit_prim_triangle_3d(g->gs, ax, ay, az, bx, by, bz, cx, cy, cz, color);
+    xform(g, va, &ax, &ay, &az);
+    xform(g, vb, &bx, &by, &bz);
+    xform(g, vc, &cx, &cy, &cz);
+
+    ca = vertex_color(g, va);
+    cb = vertex_color(g, vb);
+    cc = vertex_color(g, vc);
+
+    tex = (g->texOn && g->texImg) ? bind_texture(g) : NULL;
+
+    if (tex) {
+        float sc = (float)g->texScale / (32.0f * 65536.0f);
+        float iw = sc / (float)g->texW;
+        float ih = sc / (float)g->texH;
+        gsKit_prim_triangle_goraud_texture_3d(g->gs, (GSTEXTURE *)tex,
+            ax, ay, az, (float)va->tc[0] * iw, (float)va->tc[1] * ih,
+            bx, by, bz, (float)vb->tc[0] * iw, (float)vb->tc[1] * ih,
+            cx, cy, cz, (float)vc->tc[0] * iw, (float)vc->tc[1] * ih,
+            ca, cb, cc);
+    } else {
+        gsKit_prim_triangle_3d(g->gs, ax, ay, az, bx, by, bz, cx, cy, cz, ca);
+    }
 }
+
+void mmps2_gfx_set_modelview(Mmps2Gfx *g, const Mtx *m)
+{
+    g->mv[0] = *m;
+    g->mvTop = 0;
+}
+
+void mmps2_gfx_set_projection(Mmps2Gfx *g, const Mtx *m)
+{
+    g->proj[0] = *m;
+    g->projTop = 0;
+}
+
 
 static void run_dl(Mmps2Gfx *g, const Gfx *dl, int depth)
 {
@@ -237,9 +432,20 @@ static void run_dl(Mmps2Gfx *g, const Gfx *dl, int depth)
 
         case G_MTX: {
             int flags = (int)(w0 & 0xFF) ^ G_MTX_PUSH;
-            const Mtx *m = (const Mtx *)resolve(g, w1);
-            Mtx *stack = (flags & G_MTX_PROJECTION) ? g->proj : g->mv;
-            int *top = (flags & G_MTX_PROJECTION) ? &g->projTop : &g->mvTop;
+            const Mtx *m;
+            Mtx *stack;
+            int *top;
+
+            // Extracted actor limbs load their bone matrix from a per-limb table
+            // at segment 0x0D. We pose the skeleton ourselves, so ignore these.
+            if (((w1 >> 24) & 0x0F) == 0x0D && g->seg[0x0D] == 0) {
+                p++;
+                break;
+            }
+
+            m = (const Mtx *)resolve(g, w1);
+            stack = (flags & G_MTX_PROJECTION) ? g->proj : g->mv;
+            top = (flags & G_MTX_PROJECTION) ? &g->projTop : &g->mvTop;
 
             if ((flags & G_MTX_PUSH) && *top < MMPS2_MTX_STACK - 1) {
                 stack[*top + 1] = stack[*top];
@@ -353,13 +559,27 @@ static void run_dl(Mmps2Gfx *g, const Gfx *dl, int depth)
             break;
 
         case G_SETOTHERMODE_H:
-        case G_SETOTHERMODE_L:
-            if (cmd == G_SETOTHERMODE_H)
-                g->othermode_h |= w1;
-            else
-                g->othermode_l |= w1;
+        case G_SETOTHERMODE_L: {
+            int len = (int)(w0 & 0xFF) + 1;
+            int sft = 32 - (int)((w0 >> 8) & 0xFF) - len;
+            u32 mask, data;
+
+            if (sft < 0 || sft > 31)
+                sft = 0;
+            mask = (len >= 32) ? 0xFFFFFFFFu : (((1u << len) - 1u) << sft);
+            data = (w1 << sft);
+
+            if (cmd == G_SETOTHERMODE_H) {
+                g->othermode_h = (g->othermode_h & ~mask) | (data & mask);
+                g->tlutType = (int)((g->othermode_h >> G_MDSFT_TEXTLUT) & 3);
+                g->filter = ((g->othermode_h >> G_MDSFT_TEXTFILT) & 3)
+                                ? GS_FILTER_LINEAR : GS_FILTER_NEAREST;
+            } else {
+                g->othermode_l = (g->othermode_l & ~mask) | (data & mask);
+            }
             p++;
             break;
+        }
 
         case G_SETCOMBINE:
             g->combine_hi = w0;
@@ -368,21 +588,37 @@ static void run_dl(Mmps2Gfx *g, const Gfx *dl, int depth)
             break;
 
         case G_SETTILE: {
-            u32 tile = (w1 >> 16) & 0x07;
+            u32 tile = (w1 >> 24) & 0x07;
             g->tile[tile] = w0;
+            if (tile == G_TX_RENDERTILE) {
+                g->tileFmt = (w0 >> 21) & 0x07;
+                g->tileSiz = (w0 >> 19) & 0x03;
+            }
             p++;
             break;
         }
 
         case G_SETTILESIZE: {
-            u32 tile = (w1 >> 16) & 0x07;
+            u32 tile = (w1 >> 24) & 0x07;
             g->tileSize[tile] = w0;
+            if (tile == G_TX_RENDERTILE) {
+                u32 uls = (w0 >> 12) & 0xFFF, ult = w0 & 0xFFF;
+                u32 lrs = (w1 >> 12) & 0xFFF, lrt = w1 & 0xFFF;
+                g->texW = ((lrs - uls) >> 2) + 1;
+                g->texH = ((lrt - ult) >> 2) + 1;
+            }
             p++;
             break;
         }
 
         case G_SETTIMG:
-            g->texImg = w1;
+            g->texImg = resolve(g, w1);
+            p++;
+            break;
+
+        case G_LOADTLUT:
+            g->tlut = g->texImg;
+            g->tlutCount = ((w1 >> 14) & 0x3FF) + 1;
             p++;
             break;
 
