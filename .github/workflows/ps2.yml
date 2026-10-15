@@ -43,22 +43,22 @@ jobs:
         continue-on-error: true
         run: |
           echo "PS2DEV=$PS2DEV  PS2SDK=$PS2SDK"
-          echo "--- ee bin dir ---"
-          ls "$PS2DEV/ee/bin" 2>/dev/null || ls "$PS2DEV/ee/" 2>/dev/null || true
-          echo "--- compilers on PATH ---"
-          command -v ee-gcc || true
-          command -v ee-g++ || true
-          command -v ee-c++ || true
+          echo "--- sdl2 / pthread headers shipped by ps2sdk? ---"
+          ls "$PS2SDK/ports/include" 2>/dev/null | grep -i sdl || echo "(no SDL under ports/include)"
+          ls "$PS2SDK/ee/include" 2>/dev/null | grep -iE 'pthread|thread' || echo "(no pthread under ee/include)"
           echo "--- try C++ compilers ---"
           for cxx in mips64r5900el-ps2-elf-g++ mips64r5900el-ps2-elf-c++ ee-g++ ee-c++; do
             command -v "$cxx" >/dev/null 2>&1 || continue
             for std in c++20 c++17 c++14 c++11; do
-              echo "== $cxx -std=$std =="
-              if "$cxx" -std=$std -O2 platform/ps2/probe.cpp -o /tmp/probe_ee -lm 2>/tmp/err; then
-                echo "OK: $cxx -std=$std builds"; break 2
-              else
-                head -3 /tmp/err
-              fi
+              for defs in "" "-DPROBE_THREADS" "-DPROBE_THREADS -DPROBE_FILESYSTEM"; do
+                echo "== $cxx -std=$std $defs =="
+                if "$cxx" -std=$std -O2 $defs platform/ps2/probe.cpp -o /tmp/probe_ee -lm 2>/tmp/err; then
+                  echo "OK: $cxx -std=$std $defs builds"
+                else
+                  echo "FAIL: $cxx -std=$std $defs"
+                  head -4 /tmp/err
+                fi
+              done
             done
           done
 
