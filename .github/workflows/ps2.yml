@@ -63,6 +63,33 @@ jobs:
             done
           done
 
+      - name: Probe decomp compile for the EE
+        continue-on-error: true
+        run: |
+          MM_REV=bf6bd9d0d3a90fe2f8960e034fbfd328e8bdef22
+          rm -rf /tmp/mm && git init -q /tmp/mm
+          git -C /tmp/mm remote add origin https://github.com/zeldaret/mm
+          git -C /tmp/mm fetch -q --depth 1 origin "$MM_REV"
+          git -C /tmp/mm checkout -q FETCH_HEAD
+          git -C /tmp/mm submodule update -q --init --depth 1 || true
+          CC=mips64r5900el-ps2-elf-gcc
+          INC="-Iinclude -Iinclude/libc -Isrc -I."
+          for f in \
+              src/libultra/os/createmesgqueue.c \
+              src/libultra/gu/perspective.c \
+              src/libultra/gu/lookat.c \
+              src/code/sys_math3d.c \
+              src/code/z_actor.c ; do
+            echo "== $f =="
+            if "$CC" -c -O1 -w -DNON_MATCHING -D_LANGUAGE_C -mno-abicalls $INC \
+                 "/tmp/mm/$f" -o /tmp/mm.o 2>/tmp/err; then
+              echo "OK: $f"
+            else
+              echo "FAIL: $f"
+              head -15 /tmp/err
+            fi
+          done
+
       - name: Upload ELF
         uses: actions/upload-artifact@v4
         with:
