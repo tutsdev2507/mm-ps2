@@ -55,7 +55,7 @@ jobs:
           git -C third_party/mm checkout -q FETCH_HEAD
 
       - name: Build PS2 bring-up runtime (P0+P1+P2, decomp gu)
-        run: make -C platform/ps2 MM_DIR=third_party/mm
+        run: make -C platform/ps2 MM_DIR="$PWD/third_party/mm"
 
       - name: Probe EE C++ toolchain
         continue-on-error: true

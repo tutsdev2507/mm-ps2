@@ -2,6 +2,10 @@ PS2DEV ?= /usr/local/ps2dev
 PS2SDK ?= $(PS2DEV)/ps2sdk
 GSKIT  ?= $(PS2SDK)/ports
 
+ifneq ($(MM_DIR),)
+override MM_DIR := $(abspath $(MM_DIR))
+endif
+
 EE_BIN  = mmps2-boot.elf
 EE_OBJS = boot.o mmps2_os.o gfx.o
 
