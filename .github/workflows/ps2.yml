@@ -12,10 +12,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
       - name: Install 32-bit libc (for asset integration test)
-        run: sudo apt-get update && sudo apt-get install -y gcc-multilib libc6-dev-i386 gdb
+        run: sudo apt-get update && sudo apt-get install -y gcc-multilib libc6-dev-i386
       - name: Run interpreter tests
-        env:
-          MMPS2_GDB: "1"
         run: bash port/tests/run.sh
 
   build:
