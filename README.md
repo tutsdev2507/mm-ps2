@@ -84,14 +84,36 @@ back to a raw pointer for hand-built lists.
 Requires a **user-owned** copy of the USA 1.0 ROM for asset extraction only; the ROM is
 never committed. See `scripts/setup.sh` and `scripts/extract_assets.sh`.
 
-The PS2 ELF is built via GitHub Actions (`ps2dev/ps2dev` docker + prebuilt `gsKit`);
-local Android/Termux cannot build MIPS/EE (`/storage` is `noexec`).
+The PS2 ELFs are built either by GitHub Actions (`.github/workflows/ps2.yml`, uses the
+`ps2dev/ps2dev` image) or **locally on Android/Termux**.
 
-The GBI interpreter has native host tests (no EE toolchain needed):
+### Local Termux build (no CI, no token)
+
+Termux is aarch64 and cannot run the ps2dev x86_64 toolchain natively, but it runs fine
+through `qemu-x86_64` + `proot`:
+
+```
+pkg install proot qemu-user-x86_64 python curl
+scripts/setup.sh                       # fetch the pinned decomp source
+scripts/build_termux.sh                # downloads the ps2dev image, builds both ELFs
+```
+
+`scripts/build_termux.sh` pulls the public `ps2dev/ps2dev` OCI image from `ghcr.io`,
+unpacks its filesystem + `/usr/local/ps2dev` toolchain into a local rootfs
+(`$HOME/tmp/ps2root`), recreates the toolchain's `$sysroot/bin` links (the app-data
+filesystem rejects the image's hard links), installs `make`, and produces:
+
+```
+port/mm-ps2.elf                  # F3DEX2 interpreter + object_ah demo
+platform/ps2/mmps2-boot.elf      # bring-up runtime (+ decomp gu math)
+```
+
+The GBI interpreter also has native host tests (no EE toolchain needed):
 
 ```
 bash port/tests/run.sh
 ```
 
 They compile `src/gfx/gfx.c` against stub headers and assert the emitted triangles for
-TRI1/TRI2/QUAD, viewport, segment addressing and geometry-mode set/clear.
+TRI1/TRI2/QUAD, viewport, segment addressing, geometry-mode set/clear and per-tile
+texture decoding/UVs.

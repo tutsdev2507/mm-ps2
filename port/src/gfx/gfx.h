@@ -84,7 +84,8 @@ typedef struct {
     int texCacheCount;
     int texLevel;
     int texOn;
-    s32 texScale;
+    s32 texScale;          // G_TEXTURE S scale (16.16)
+    s32 texScaleT;         // G_TEXTURE T scale (16.16)
 
     int width;
     int height;

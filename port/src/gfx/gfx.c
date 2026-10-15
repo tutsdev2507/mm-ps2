@@ -7,6 +7,7 @@
 // triangles, colors); textured/combiner commands are recorded but not yet
 // rasterised, and unknown commands are no-ops so lists still "run".
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
@@ -158,6 +159,7 @@ void mmps2_gfx_init(Mmps2Gfx *g, GSGLOBAL *gs)
     g->a = 0x80;
     g->ea = 0xFF;
     g->texScale = 0x10000;
+    g->texScaleT = 0x10000;
     g->filter = GS_FILTER_NEAREST;
     mmps2_mtx_identity(&g->proj[0]);
     mmps2_mtx_identity(&g->mv[0]);
@@ -207,6 +209,17 @@ static void xform(const Mmps2Gfx *g, const Vtx *v, float *sx, float *sy, int *iz
 }
 
 static void emit_triangle(Mmps2Gfx *g, int a, int b, int c);
+
+// Wrap a texel-unit coordinate into [0, size) (G_TX_WRAP / REPEAT). Returns the
+// coordinate unchanged when size is degenerate so a bad tile never NaNs.
+static float wrap_uv(float x, float size)
+{
+    if (!(size > 0.0f))
+        return x;
+    x = x / size;
+    x = x - floorf(x);
+    return x * size;
+}
 
 // --- Texture decoding -------------------------------------------------------
 
@@ -513,8 +526,11 @@ static void emit_triangle(Mmps2Gfx *g, int a, int b, int c)
     int wantTex;
 
     if (a < 0 || a >= MMPS2_VTX_MAX || b < 0 || b >= MMPS2_VTX_MAX ||
-        c < 0 || c >= MMPS2_VTX_MAX)
+        c < 0 || c >= MMPS2_VTX_MAX) {
+        fprintf(stderr, "DBGTRI skip a=%d b=%d c=%d max=%d\n", a, b, c,
+                MMPS2_VTX_MAX);
         return;
+    }
 
     va = &g->vtx[a];
     vb = &g->vtx[b];
@@ -554,13 +570,32 @@ static void emit_triangle(Mmps2Gfx *g, int a, int b, int c)
     }
 
     if (tex) {
-        float sc = (float)g->texScale / (32.0f * 65536.0f);
-        float iw = sc / (float)g->texW;
-        float ih = sc / (float)g->texH;
+        // gsKit's texture primitives take U/V in *texel* units (its own
+        // examples pass tex->Width / tex->Height); it then scales by 16 and
+        // clamps to the texture. So convert the N64 s10.5 vertex coordinate to
+        // texels here (tc * scale / 32), then wrap into the tile so a texture
+        // that repeats (the default G_TX_WRAP) tiles instead of being clamped
+        // to its edge -- which is what made extracted models look smeared.
+        float ss = (float)g->texScale / (32.0f * 65536.0f);
+        float st = (float)g->texScaleT / (32.0f * 65536.0f);
+        float W = (float)g->texW, H = (float)g->texH;
+        float u0 = wrap_uv((float)va->tc[0] * ss, W);
+        float v0 = wrap_uv((float)va->tc[1] * st, H);
+        float u1 = wrap_uv((float)vb->tc[0] * ss, W);
+        float v1 = wrap_uv((float)vb->tc[1] * st, H);
+        float u2 = wrap_uv((float)vc->tc[0] * ss, W);
+        float v2 = wrap_uv((float)vc->tc[1] * st, H);
+        if (getenv("MMPS2_TEXDBG")) {
+            static int dbg;
+            if (dbg++ < 20000)
+                fprintf(stderr, "TEXDBG w=%u h=%u scaleS=0x%x scaleT=0x%x "
+                                "fmt=%d siz=%d tc0=(%d,%d) tc1=(%d,%d)\n",
+                        g->texW, g->texH, (unsigned)g->texScale,
+                        (unsigned)g->texScaleT, g->tileFmt, g->tileSiz,
+                        va->tc[0], va->tc[1], vb->tc[0], vb->tc[1]);
+        }
         gsKit_prim_triangle_goraud_texture_3d(g->gs, (GSTEXTURE *)tex,
-            ax, ay, az, (float)va->tc[0] * iw, (float)va->tc[1] * ih,
-            bx, by, bz, (float)vb->tc[0] * iw, (float)vb->tc[1] * ih,
-            cx, cy, cz, (float)vc->tc[0] * iw, (float)vc->tc[1] * ih,
+            ax, ay, az, u0, v0, bx, by, bz, u1, v1, cx, cy, cz, u2, v2,
             ca, cb, cc);
     } else {
         gsKit_prim_triangle_3d(g->gs, ax, ay, az, bx, by, bz, cx, cy, cz, ca);
@@ -609,6 +644,9 @@ static void run_dl(Mmps2Gfx *g, const Gfx *dl, int depth)
             int base = (int)((w0 >> 1) & 0x7F) - n;
             const Vtx *src = (const Vtx *)resolve(g, w1);
             int i;
+            if (base + n > MMPS2_VTX_MAX || base < 0 || !src)
+                fprintf(stderr, "DBGVTX n=%d base=%d max=%d src=%p\n", n, base,
+                        MMPS2_VTX_MAX, (const void *)src);
             if (src) {
                 for (i = 0; i < n && base + i < MMPS2_VTX_MAX; i++) {
                     if (base + i >= 0) {
@@ -771,6 +809,7 @@ static void run_dl(Mmps2Gfx *g, const Gfx *dl, int depth)
             g->texLevel = (int)((w0 >> 11) & 0x07);
             g->texOn = (int)((w0 >> 1) & 0x7F);
             g->texScale = (s32)((w1 >> 16) & 0xFFFF);
+            g->texScaleT = (s32)(w1 & 0xFFFF);
             p++;
             break;
 
