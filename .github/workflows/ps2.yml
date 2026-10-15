@@ -73,7 +73,7 @@ jobs:
           git -C /tmp/mm checkout -q FETCH_HEAD
           git -C /tmp/mm submodule update -q --init --depth 1 || true
           CC=mips64r5900el-ps2-elf-gcc
-          INC="-Iinclude -Iinclude/libc -Isrc -I."
+          INC="-I/tmp/mm/include -I/tmp/mm/include/libc -I/tmp/mm/src -I/tmp/mm"
           for f in \
               src/libultra/os/createmesgqueue.c \
               src/libultra/gu/perspective.c \
