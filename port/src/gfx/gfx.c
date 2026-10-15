@@ -117,7 +117,9 @@ static const void *resolve(const Mmps2Gfx *g, u32 w1)
     u32 seg = (w1 >> 24) & 0x0F;
     if (g->seg[seg] != 0)
         return (const void *)(uintptr_t)(g->seg[seg] + (w1 & 0x00FFFFFF));
-    return (const void *)(uintptr_t)(w1 & ~7u);
+    /* For host-extracted assets, w1 stores the full pointer value. Do not
+     * truncate to 24 bits on 32-bit builds, as that corrupts high addresses. */
+    return (const void *)(uintptr_t)w1;
 }
 
 void mmps2_gfx_init(Mmps2Gfx *g, GSGLOBAL *gs)
