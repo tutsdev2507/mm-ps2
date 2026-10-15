@@ -25,7 +25,13 @@ if "$CC" -m32 -x c - -o "$out/probe" >/dev/null 2>&1 <<<'int main(void){return 0
         "$here/test_object_ah.c" "$src/gfx/gfx.c" \
         "$src/../assets/object_ah/object_ah.c" -lm -o "$out/test_object_ah"
     if [ -n "${MMPS2_GDB:-}" ] && command -v gdb >/dev/null 2>&1; then
-        gdb -batch -ex run -ex bt -ex 'info registers eip' --args "$out/test_object_ah"
+        log="$out/gdb.log"
+        gdb -batch -ex run -ex bt -ex 'info registers eip' \
+            --args "$out/test_object_ah" 2>&1 | tee "$log"
+        if grep -qE 'SIGSEGV|SIGABRT|SIGBUS' "$log"; then
+            echo "!! object_ah integration test crashed" >&2
+            exit 1
+        fi
     else
         "$out/test_object_ah"
     fi

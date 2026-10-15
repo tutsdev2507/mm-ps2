@@ -110,15 +110,21 @@ void mmps2_mtx_rotate_y(Mtx *m, float rad)
     mtx_set(m, 2, 2, c);
 }
 
-// Resolve an N64 address word: if the 4-bit segment is loaded, base + offset,
-// otherwise treat the word as a direct host pointer (used by hand-built DLs).
+// Resolve an N64 address word. Extracted assets store two kinds of values:
+//   * a 4-bit segment number in the high nibble (e.g. 0x0D000000) whose base is
+//     installed with gsSPSegment(G_MWO_SEGMENT); and
+//   * a complete host pointer to a static asset (e.g. 0x5656e970).
+// A segment-style word whose segment is not currently loaded refers to data
+// swapped in at runtime (animated textures, actor overlays); return NULL so the
+// caller can skip it instead of dereferencing a bogus address.
 static const void *resolve(const Mmps2Gfx *g, u32 w1)
 {
+    u32 top = (w1 >> 24) & 0xFF;
     u32 seg = (w1 >> 24) & 0x0F;
     if (g->seg[seg] != 0)
         return (const void *)(uintptr_t)(g->seg[seg] + (w1 & 0x00FFFFFF));
-    /* For host-extracted assets, w1 stores the full pointer value. Do not
-     * truncate to 24 bits on 32-bit builds, as that corrupts high addresses. */
+    if (top != 0 && top < 0x10)
+        return NULL;
     return (const void *)(uintptr_t)w1;
 }
 
@@ -202,6 +208,9 @@ void mmps2_tex_decode(u32 *dst, u32 fmt, u32 siz, u32 w, u32 h,
 {
     u32 n = w * h;
     u32 i;
+
+    if (!src)
+        return;
 
     switch (fmt) {
     case G_IM_FMT_RGBA: {
@@ -415,12 +424,14 @@ static void run_dl(Mmps2Gfx *g, const Gfx *dl, int depth)
             int base = (int)((w0 >> 1) & 0x7F) - n;
             const Vtx *src = (const Vtx *)resolve(g, w1);
             int i;
-            for (i = 0; i < n && base + i < MMPS2_VTX_MAX; i++) {
-                if (base + i >= 0)
-                    g->vtx[base + i] = src[i];
+            if (src) {
+                for (i = 0; i < n && base + i < MMPS2_VTX_MAX; i++) {
+                    if (base + i >= 0)
+                        g->vtx[base + i] = src[i];
+                }
+                if (base + n > g->nvtx && base + n <= MMPS2_VTX_MAX)
+                    g->nvtx = base + n;
             }
-            if (base + n > g->nvtx && base + n <= MMPS2_VTX_MAX)
-                g->nvtx = base + n;
             p++;
             break;
         }
@@ -449,6 +460,10 @@ static void run_dl(Mmps2Gfx *g, const Gfx *dl, int depth)
             }
 
             m = (const Mtx *)resolve(g, w1);
+            if (!m) {
+                p++;
+                break;
+            }
             stack = (flags & G_MTX_PROJECTION) ? g->proj : g->mv;
             top = (flags & G_MTX_PROJECTION) ? &g->projTop : &g->mvTop;
 
@@ -484,7 +499,8 @@ static void run_dl(Mmps2Gfx *g, const Gfx *dl, int depth)
             int idx = (int)(w0 & 0xFF);
             if (idx == G_MV_VIEWPORT) {
                 const Vp *vp = (const Vp *)resolve(g, w1);
-                g->vp = *vp;
+                if (vp)
+                    g->vp = *vp;
             }
             p++;
             break;
