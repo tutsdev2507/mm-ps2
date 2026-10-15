@@ -13,6 +13,13 @@ jobs:
         uses: actions/checkout@v4
       - name: Install 32-bit libc (for asset integration test)
         run: sudo apt-get update && sudo apt-get install -y gcc-multilib libc6-dev-i386
+      - name: Fetch decomp source (pinned, for the gu integration test)
+        run: |
+          MM_REV=bf6bd9d0d3a90fe2f8960e034fbfd328e8bdef22
+          git init -q third_party/mm
+          git -C third_party/mm remote add origin https://github.com/zeldaret/mm
+          git -C third_party/mm fetch -q --depth 1 origin "$MM_REV"
+          git -C third_party/mm checkout -q FETCH_HEAD
       - name: Run interpreter tests
         run: bash port/tests/run.sh
 

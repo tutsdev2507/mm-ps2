@@ -17,6 +17,25 @@ trap 'rm -rf "$out"' EXIT
 
 "$out/test_gfx"
 
+# Decomp-integration test: link the decomp's real gu math (float[4][4]) through
+# the port adapter. Needs the decomp source, fetched by scripts/setup.sh.
+mm="$src/../../third_party/mm"
+if [ -f "$mm/include/ultra64.h" ]; then
+    dec_cflags=(-O1 -w -D_LANGUAGE_C -DNON_MATCHING
+                -I "$mm/include" -I "$mm/include/libc" -I "$mm")
+    "$CC" -c "${dec_cflags[@]}" "$mm/src/libultra/gu/perspective.c" -o "$out/perspective.o"
+    "$CC" -c "${dec_cflags[@]}" "$mm/src/libultra/gu/lookat.c" -o "$out/lookat.o"
+    "$CC" -c "${dec_cflags[@]}" "$src/ultra/gu_compat.c" -o "$out/gu_compat.o"
+    "$CC" -std=c11 -Wall -Wextra -O1 \
+        -I "$here/stub" -I "$src" -I "$src/gfx" \
+        "$here/test_gu.c" "$src/ultra/gu_adapter.c" \
+        "$out/perspective.o" "$out/lookat.o" "$out/gu_compat.o" \
+        -lm -o "$out/test_gu"
+    "$out/test_gu"
+else
+    echo "-- skipping gu integration test (third_party/mm missing; run scripts/setup.sh)"
+fi
+
 # Integration test against the real extracted object_ah asset. It needs 32-bit
 # pointers, so it is only built where -m32 links+runs (CI, x86-64 multilib).
 if "$CC" -m32 -x c - -o "$out/probe" >/dev/null 2>&1 <<<'int main(void){return 0;}'; then
