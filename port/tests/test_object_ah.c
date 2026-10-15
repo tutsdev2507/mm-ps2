@@ -84,6 +84,9 @@ int main(void)
         const StandardLimb *limb = (const StandardLimb *)seg[i];
         if (limb == NULL || limb->dList == NULL)
             continue;
+        printf("  limb %d: dList=%p tris=%d ttris=%d up=%d\n", i,
+               (void *)limb->dList, g_tris, g_ttris, g_uploads);
+        fflush(stdout);
         mmps2_gfx_run(&g, limb->dList);
     }
 

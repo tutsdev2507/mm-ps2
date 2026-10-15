@@ -42,12 +42,24 @@ jobs:
       - name: Probe EE C++ toolchain
         continue-on-error: true
         run: |
-          for std in c++20 c++17 c++14 c++11; do
-            echo "== trying -std=$std =="
-            if ee-g++ -std=$std -O2 platform/ps2/probe.cpp -o /tmp/probe_ee -lm; then
-              echo "OK: -std=$std builds"
-              break
-            fi
+          echo "PS2DEV=$PS2DEV  PS2SDK=$PS2SDK"
+          echo "--- ee bin dir ---"
+          ls "$PS2DEV/ee/bin" 2>/dev/null || ls "$PS2DEV/ee/" 2>/dev/null || true
+          echo "--- compilers on PATH ---"
+          command -v ee-gcc || true
+          command -v ee-g++ || true
+          command -v ee-c++ || true
+          echo "--- try C++ compilers ---"
+          for cxx in ee-g++ ee-c++ mips64el-unknown-linux-gnu-g++ ee-gcc; do
+            command -v "$cxx" >/dev/null 2>&1 || continue
+            for std in c++20 c++17 c++14 c++11; do
+              echo "== $cxx -std=$std =="
+              if "$cxx" -std=$std -O2 platform/ps2/probe.cpp -o /tmp/probe_ee -lm 2>/tmp/err; then
+                echo "OK: $cxx -std=$std builds"; break 2
+              else
+                head -3 /tmp/err
+              fi
+            done
           done
 
       - name: Upload ELF

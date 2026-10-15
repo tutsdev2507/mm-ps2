@@ -259,6 +259,9 @@ static const GSTEXTURE *bind_texture(Mmps2Gfx *g)
 
     if (!g->texImg || w == 0 || h == 0)
         return NULL;
+    // Bail out on implausible tile dimensions rather than over-read the source.
+    if (w > 1024 || h > 1024)
+        return NULL;
     if (g->tileFmt == G_IM_FMT_CI && g->tlut) {
         if (g->tlutCount < 256)
             return NULL;
@@ -604,8 +607,8 @@ static void run_dl(Mmps2Gfx *g, const Gfx *dl, int depth)
             if (tile == G_TX_RENDERTILE) {
                 u32 uls = (w0 >> 12) & 0xFFF, ult = w0 & 0xFFF;
                 u32 lrs = (w1 >> 12) & 0xFFF, lrt = w1 & 0xFFF;
-                g->texW = ((lrs - uls) >> 2) + 1;
-                g->texH = ((lrt - ult) >> 2) + 1;
+                g->texW = (lrs >= uls) ? ((lrs - uls) >> 2) + 1 : 0;
+                g->texH = (lrt >= ult) ? ((lrt - ult) >> 2) + 1 : 0;
             }
             p++;
             break;
