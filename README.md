@@ -71,8 +71,10 @@ back to a raw pointer for hand-built lists.
 - [ ] **M3 — boot**: libultra shim (threads, mesg queues, timers, VI swap) so
       `bootproc -> Main -> graph thread` runs and presents frames. *(started: the
       decomp's own float `gu` math — `guPerspectiveF`/`guLookAtF` — is compiled,
-      linked and tested through `port/src/ultra/`; the C replacements for the
-      assembly `guMtxIdentF`/`guMtxF2L` live there too)*
+      linked and tested through `port/src/ultra/`; build the bring-up runtime with
+      `make -C platform/ps2 MM_DIR=third_party/mm` to build its projection/view
+      matrices. C replacements for the assembly `guMtxIdentF`/`guMtxF2L` live
+      there too)*
 - [ ] **M4 — input**: controller shim over `libpad` (PadMgr).
 - [ ] **M5 — audio**: port the audio engine (or stub) to the EE.
 - [ ] **M6 — persistence**: save / flash / SRAM backend to memory card.

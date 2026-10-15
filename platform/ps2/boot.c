@@ -15,6 +15,9 @@
 
 #include "mmps2_os.h"
 #include "gfx/gfx.h"
+#ifdef MMPS2_USE_DECOMP_GU
+#include "ultra/gu_adapter.h"
+#endif
 
 #define MMPS2_PI 3.14159265358979f
 
@@ -30,7 +33,9 @@ static u8 g_graphStack[MMPS2_DEFAULT_STACK_SIZE] __attribute__((aligned(16)));
 static Vtx g_vtx[4] __attribute__((aligned(16)));
 static Mtx g_proj __attribute__((aligned(16)));
 static Mtx g_view __attribute__((aligned(16)));
+#ifndef MMPS2_USE_DECOMP_GU
 static Mtx g_rot __attribute__((aligned(16)));
+#endif
 
 static int vsync_handler(int id)
 {
@@ -63,9 +68,17 @@ static void graph_frame(u32 frame)
     u8 g = (u8)(128 + 127.0f * sinf((float)frame * 0.05f + 2.0f));
     u8 b = (u8)(128 + 127.0f * sinf((float)frame * 0.07f + 4.0f));
 
+#ifdef MMPS2_USE_DECOMP_GU
+    {
+        float a = (float)frame * 0.02f;
+        mmps2_gu_lookat(&g_view, sinf(a) * 3000.0f, 400.0f, cosf(a) * 3000.0f,
+                        0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f);
+    }
+#else
     mmps2_mtx_rotate_y(&g_rot, (float)frame * 0.02f);
     mmps2_mtx_translate(&g_view, 0.0f, 0.0f, -3000.0f);
     mmps2_mtx_multiply(&g_view, &g_view, &g_rot);
+#endif
 
     dl[n++] = gsSPMatrix(&g_proj, G_MTX_PROJECTION | G_MTX_LOAD | G_MTX_NOPUSH);
     dl[n++] = gsSPMatrix(&g_view, G_MTX_MODELVIEW | G_MTX_LOAD | G_MTX_NOPUSH);
@@ -111,8 +124,12 @@ int main(void)
     gsKit_mode_switch(g_gs, GS_ONESHOT);
 
     mmps2_gfx_init(&g_gfx, g_gs);
+#ifdef MMPS2_USE_DECOMP_GU
+    mmps2_gu_perspective(&g_proj, 45.0f, 640.0f / 448.0f, 10.0f, 20000.0f);
+#else
     mmps2_mtx_perspective(&g_proj, 45.0f * MMPS2_PI / 180.0f,
                           640.0f / 448.0f, 10.0f, 20000.0f);
+#endif
     mmps2_gfx_set_projection(&g_gfx, &g_proj);
     init_quad();
 

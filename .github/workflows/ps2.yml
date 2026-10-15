@@ -46,8 +46,16 @@ jobs:
       - name: Build port
         run: make -C port
 
-      - name: Build PS2 bring-up runtime (P0+P1)
-        run: make -C platform/ps2
+      - name: Fetch decomp source (pinned)
+        run: |
+          MM_REV=bf6bd9d0d3a90fe2f8960e034fbfd328e8bdef22
+          git init -q third_party/mm
+          git -C third_party/mm remote add origin https://github.com/zeldaret/mm
+          git -C third_party/mm fetch -q --depth 1 origin "$MM_REV"
+          git -C third_party/mm checkout -q FETCH_HEAD
+
+      - name: Build PS2 bring-up runtime (P0+P1+P2, decomp gu)
+        run: make -C platform/ps2 MM_DIR=third_party/mm
 
       - name: Probe EE C++ toolchain
         continue-on-error: true
