@@ -1,15 +1,20 @@
 /*
  * ROM + log file access for the PS2 port.
  *
- * Uses only ps2sdk's fio* RPC layer (fileio.h): it needs nothing from newlib
- * having been initialised by a crt0, which this port does not use.  Sees NO
- * decomp headers (avoids the uintptr_t/wint_t clash from HANDOFF.md).
+ * Uses ps2sdk's fileXio RPC layer (fileXio_rpc.h), NOT the legacy fio API.
+ * The `mass:` device is registered on the IOP's *iomanX*, which only fileXio
+ * (or the POSIX newlib glue that routes to fileXio) can reach -- the old fio
+ * talks to plain ioman and silently fails to open mass:.  fileXio needs the
+ * iomanX/fileXio IOP modules present; launchers like uLaunchELF/OPL have
+ * already loaded them.
+ *
+ * Sees NO decomp headers (avoids the uintptr_t/wint_t clash from HANDOFF.md),
+ * so it is a port-context translation unit.
  */
 
 /*
- * This TU uses ps2sdk's self-contained fio* RPC API (SIF RPC to the IOP
- * "mass" device) and nothing from newlib's FILE* stdio, so the ps2sdk's
- * guard that forbids mixing fio with newlib does not apply.  Defining
+ * This TU uses fileXio* directly and nothing from newlib's FILE* stdio, so
+ * the ps2sdk guard that forbids mixing fileXio with newlib does not apply.
  * NEWLIB_PORT_AWARE is the documented escape hatch that silences that guard.
  */
 #define NEWLIB_PORT_AWARE
@@ -17,10 +22,14 @@
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
+#include <fcntl.h>
+#include <unistd.h>
 #include <tamtypes.h>
 #include <kernel.h>
 #include <sifrpc.h>
-#include <fileio.h>
+#include <fileXio_rpc.h>
+
+extern void mmps2_scr(const char *fmt, ...);
 
 static int s_io_ready;
 
@@ -30,7 +39,7 @@ static void io_init(void)
         return;
     s_io_ready = 1;
     SifInitRpc(0);
-    fioInit();
+    fileXioInit();
 }
 
 /* Tried in order; the first that opens wins. */
@@ -76,18 +85,18 @@ void mmps2_log(const char *fmt, ...)
     line[n++] = '\n';
 
     if (s_log_path) {
-        fd = fioOpen(s_log_path, FIO_O_WRONLY | FIO_O_CREAT | FIO_O_APPEND);
+        fd = fileXioOpen(s_log_path, O_WRONLY | O_CREAT | O_APPEND, 0644);
     } else {
         for (i = 0; k_log_paths[i] && fd < 0; i++) {
-            fd = fioOpen(k_log_paths[i],
-                         FIO_O_WRONLY | FIO_O_CREAT | FIO_O_TRUNC);
+            fd = fileXioOpen(k_log_paths[i],
+                             O_WRONLY | O_CREAT | O_TRUNC, 0644);
             if (fd >= 0)
                 s_log_path = k_log_paths[i];
         }
     }
     if (fd >= 0) {
-        fioWrite(fd, line, n);
-        fioClose(fd);
+        fileXioWrite(fd, line, n);
+        fileXioClose(fd);
     }
 }
 
@@ -106,18 +115,20 @@ int mmps2_rom_open(void)
     s_tried = 1;
     io_init();
     for (i = 0; k_rom_paths[i]; i++) {
-        s_fd = fioOpen(k_rom_paths[i], FIO_O_RDONLY);
+        s_fd = fileXioOpen(k_rom_paths[i], O_RDONLY, 0);
         if (s_fd >= 0) {
             mmps2_log("rom: opened %s", k_rom_paths[i]);
+            mmps2_scr("rom: opened %s", k_rom_paths[i]);
             return 0;
         }
     }
     mmps2_log("rom: ERROR baserom.z64 not found (expected mass:/MMPS2/baserom.z64)");
+    mmps2_scr("rom: ERROR baserom.z64 not found");
     return -1;
 }
 
-/* SIF DMA wants cache-line aligned buffers; destinations from the game are
- * not, so read through an aligned bounce buffer. */
+/* fileXio DMA wants cache-line aligned buffers; destinations from the game
+ * are not, so read through an aligned bounce buffer. */
 static u8 s_bounce[0x10000] __attribute__((aligned(64)));
 
 /* Reads `size` bytes at ROM offset `off`; zero-fills any shortfall.
@@ -127,7 +138,7 @@ int mmps2_rom_read(unsigned int off, void *buf, unsigned int size)
     u8 *dst = (u8 *)buf;
     unsigned int done = 0;
 
-    if (mmps2_rom_open() < 0 || fioLseek(s_fd, (int)off, 0) < 0) {
+    if (mmps2_rom_open() < 0 || fileXioLseek(s_fd, (int)off, SEEK_SET) < 0) {
         memset(buf, 0, size);
         return 0;
     }
@@ -136,7 +147,7 @@ int mmps2_rom_read(unsigned int off, void *buf, unsigned int size)
         int n;
         if (chunk > sizeof(s_bounce))
             chunk = sizeof(s_bounce);
-        n = fioRead(s_fd, s_bounce, (int)chunk);
+        n = fileXioRead(s_fd, s_bounce, (int)chunk);
         if (n <= 0)
             break;
         memcpy(dst + done, s_bounce, (unsigned int)n);

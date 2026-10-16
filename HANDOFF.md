@@ -6,15 +6,14 @@
 
 ## TL;DR
 
-- O jogo compila e **linka** inteiro para o EE (ELF code-only, ~11 MB, 0
+- O jogo compila e **linka** inteiro para o EE (ELF full-game, ~25 MB, 0
   símbolos indefinidos). Ver `.ckpt/progress/CURRENT.md`.
-- **Mas o jogo não roda ainda**: ao executar no PS2 a tela fica preta.
-- Causa mais provável: **os assets nunca são carregados**. `platform/ps2/pi_dma.c`
-  é um *stub* (não lê o ROM), então toda DMA de segmento devolve lixo/zeros e o
-  engine trava logo no boot, antes de desenhar a tela de título.
-- Próximo passo: implementar o carregamento real de assets em `pi_dma.c` (há um
-  rascunho em `platform/ps2/pi_dma_fileio.c`) e validar num emulador (PCSX2) ou
-  em hardware com saída de debug (ps2link/net).
+- `pi_dma.c` **lê o ROM de verdade** via `fileXio` (mass:/baserom.z64) e existe
+  depuração **na tela** (`dbg_scr.c`, libdebug) que mostra o estágio do boot.
+- **Mas o jogo ainda não chega à tela de título**: M4–M6 (input/áudio/save)
+  não iniciados e o boot pode parar antes do graph thread.
+- Próximo passo: validar no hardware/PCSX2 — a tela de debug mostra até onde
+  o boot chega; então fechar M4 (input) e o runtime.
 
 ## Arquitetura do port
 
@@ -124,19 +123,35 @@ Análise do `MMPS2.ELF` mostrou que a tela preta tinha causas anteriores ao
    própria dentro da imagem, zera `.bss`, chama `bootproc`) e `_sbrk` (heap
    de 2 MiB logo após `_end`). Precisa vencer o `_start` antigo: está em
    `obj_ps2`, que é linkado antes de `ps2_stubs.o` (`--allow-multiple-definition`).
-3. **I/O de arquivo** (`port/src/ps2/rom_io.c`) usa `fioOpen/fioRead` do
-   ps2sdk (não depende de init da libc) e lê via buffer alinhado.
-   `pi_dma.c` agora lê o ROM de verdade.
+3. **I/O de arquivo** (`port/src/ps2/rom_io.c`) usa a API **`fileXio`** do ps2sdk
+   (não a antiga `fio`). Motivo: o dispositivo `mass:` é registrado no **iomanX**
+   do IOP, que só o `fileXio` (ou o glue POSIX do newlib que roteia pra ele)
+   alcança — o `fio` fala com o ioman simples e falha em silêncio ao abrir
+   `mass:`. `fileXio` precisa dos módulos `iomanX.irx`/`fileXio.irx` no IOP, que
+   launchers como uLaunchELF/OPL já carregaram. Lê via buffer alinhado.
+   `pi_dma.c` agora lê o ROM de verdade (`mmps2_rom_open`/`mmps2_rom_read`).
 4. **Log em arquivo**: `mass:/MMPS2/mmps2.log` (linhas `rom:`, `dma:`, `boot:`,
    `gfx:`). A última linha mostra até onde o boot chegou.
-5. `runtime.c` inicializa o canal DMA GIF (`dmaKit`) antes do gsKit.
+5. **Depuração em TELA** (`port/src/ps2/dbg_scr.c`, `mmps2_scr`): usa
+   `init_scr`/`scr_printf` da `libdebug` (fonte de debug embutida do EE).
+   **Não precisa de IOP, mass: nem file I/O** — funciona mesmo quando o
+   carregador de ROM/log falha. Imprime marcadores em cada estágio:
+   `crt0:` → `boot:` → `rom:` → `gfx:`. Se a tela mostrar texto, o ELF
+   arrancou; a última linha diz onde parou.
+6. `runtime.c` inicializa o canal DMA GIF (`dmaKit`) antes do gsKit.
 
-Para aplicar: apague `build/ee/obj_ps2`, rode `compile_new.sh` (agora inclui
-`crt0_mmps2.c` e `rom_io.c`) e `link_full_elf.sh`.
+Para aplicar: rode `compile_new.sh` (inclui `crt0_mmps2.c`, `rom_io.c`,
+`dbg_scr.c`) e `link_full_elf.sh`.
+
+Layout de memória (verificado no ELF final, cabe nos 32 MiB do EE): imagem em
+kseg0 a partir de `0x80100000`; `.bss` termina em `0x817ff1a0`; stack própria
+`[0x817ff1c0, 0x8183f1c0)`; heap `[_end=0x8183f1c0, +2 MiB)`. O `crt0` zera
+só `[_fbss,_end_bss)`, então não atinge a stack; o `Main_InitMemory` do jogo
+zera só acima de `_end + 2 MiB`, protegendo stack e heap.
 
 Riscos conhecidos ainda abertos: endianness dos assets (ROM é big-endian),
-`Main_InitMemory` apagando RAM até 0x82000000, heap de 2 MiB pequeno para
-texturas decodificadas, entrada/áudio/save (M4–M6) não iniciados.
+heap de 2 MiB pequeno para texturas decodificadas, entrada/áudio/save (M4–M6)
+não iniciados.
 
 ## Próximo passo concreto (para quem continuar)
 

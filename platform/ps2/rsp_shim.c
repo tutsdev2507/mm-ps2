@@ -15,6 +15,7 @@
 /* runtime.c */
 extern void mmps2_run_dl(void *dl);
 extern void mmps2_log(const char *fmt, ...);
+extern void mmps2_scr(const char *fmt, ...);
 
 #ifndef OS_YIELD
 #define OS_YIELD 1
@@ -35,6 +36,8 @@ void osSpTaskStartGo(OSTask *task)
         return;
     if (s_frames < 5 || (s_frames % 600) == 0)
         mmps2_log("gfx: task #%u type=%u dl=%08x", s_frames, (unsigned)task->t.type, (unsigned)(uintptr_t)task->t.data_ptr);
+    if (s_frames == 0)
+        mmps2_scr("gfx: first display list running");
     s_frames++;
     mmps2_run_dl((void *)(uintptr_t)task->t.data_ptr);
 }

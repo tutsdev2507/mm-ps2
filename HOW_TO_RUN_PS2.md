@@ -28,10 +28,29 @@ O pacote `mm-ps2_for_ps2.zip` já vem com essa estrutura pronta. Basta extrair d
 
 ## Notas técnicas
 
-- ELF code-only: 11 MB. Assets carregados em runtime via PI DMA do baserom.
+- ELF full-game: ~25 MB. Assets carregados em runtime via PI DMA do baserom.
 - Link limpo (0 símbolos indefinidos), boot chain completa (_start → bootproc).
 - Interpretador F3DEX2 + gsKit implementado. Sistema de boot/threading funcional.
 
 ## Diagnóstico
 
-O jogo grava `MMPS2/mmps2.log` no pendrive. Se a tela ficar preta, envie esse arquivo.
+**Depuração em tela** (não precisa de log nem de dispositivo nenhum): o jogo
+imprime texto verde na tela a cada estágio do boot, da fonte de debug embutida
+do PS2 (libdebug). Ordem dos marcadores:
+
+```
+crt0: gp/sp/bss ok -> bootproc   ← o ELF arrancou (se não aparecer nada, o loader não carregou)
+boot: __osInitialize_common      ← entrou no osInitialize
+boot: gsKit up                   ← gsKit/DMA inicializados
+rom: opened mass:/MMPS2/baserom.z64   ← ROM encontrada (ou "rom: ERROR ..." se não achar)
+gfx: first display list running  ← o jogo desenhou o primeiro frame
+```
+
+A **última linha visível** diz onde o boot parou. Se aparecer `rom: ERROR`, o
+baserom não foi encontrado no pendrive. Se aparecer tudo até `gfx:`, o problema
+é de conteúdo (M4–M6), não de boot.
+
+**Log em arquivo** (complementar): o jogo grava `MMPS2/mmps2.log` no pendrive
+(via fileXio). Requer que o launcher já tenha carregado o driver `mass:`.
+Se a tela ficar preta e não houver log, confie na tela — ela funciona sem o
+dispositivo de arquivo.

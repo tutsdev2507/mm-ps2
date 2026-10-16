@@ -5,7 +5,7 @@ GSKIT  ?= $(PS2DEV)/gsKit
 MM_DIR ?= ../../third_party/mm
 
 EE_BIN  = MMPS2.ELF
-EE_OBJS = rom_io.o boot.o mmps2_os.o hw_shim.o cache_tlb.o vi_gs.o pi_dma.o rsp_shim.o segloader.o gfx.o
+EE_OBJS = rom_io.o dbg_scr.o boot.o mmps2_os.o hw_shim.o cache_tlb.o vi_gs.o pi_dma.o rsp_shim.o segloader.o gfx.o
 # audio stubs
 EE_OBJS += audio_stubs.o
 

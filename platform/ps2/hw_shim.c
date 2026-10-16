@@ -18,6 +18,7 @@
 /* runtime.c / vi_gs.c */
 extern void mmps2_runtime_init(void);
 extern void mmps2_log(const char *fmt, ...);
+extern void mmps2_scr(const char *fmt, ...);
 
 /* osTvType/osResetType/osMemSize/osRomBase are declared s32 in
  * include/PR/os_system.h; do not redeclare them here with another type. */
@@ -35,10 +36,13 @@ static void mmps2_publish_system(void)
 
 void __osInitialize_common(void)
 {
+    mmps2_scr("boot: __osInitialize_common");
     mmps2_log("boot: __osInitialize_common enter");
     mmps2_os_init();
     mmps2_publish_system();
+    mmps2_scr("boot: init gsKit/DMA...");
     mmps2_runtime_init();
+    mmps2_scr("boot: gsKit up");
     mmps2_log("boot: runtime/gsKit up");
 }
 

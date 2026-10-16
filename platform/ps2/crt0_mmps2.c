@@ -42,9 +42,11 @@ __asm__(
 
 extern void bootproc(void);
 extern char _end[];
+extern void mmps2_scr(const char *fmt, ...);
 
 void mmps2_crt0_main(void)
 {
+    mmps2_scr("crt0: gp/sp/bss ok -> bootproc");
     bootproc();
     for (;;) {
     }
