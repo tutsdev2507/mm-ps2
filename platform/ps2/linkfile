@@ -30,8 +30,18 @@ PHDRS {
 SECTIONS {
 	/* 0x80100000 == physical 0x100000: the EE kernel owns the first 1 MiB of
 	 * RAM, linking below that overwrites it on load (that was the black screen).
+	 *
+	 * AT(0x00100000) sets the LOAD MEMORY ADDRESS (p_paddr) to the true
+	 * physical address, while VMA (p_vaddr) stays in kseg0.  The game's N64
+	 * address arithmetic (OS_PHYSICAL_TO_K0 etc.) needs kseg0 virtual
+	 * addresses, but the PS2 kernel/uLaunchELF ELF loader copies each PT_LOAD
+	 * segment to p_paddr -- which must be a valid physical address (<32 MiB).
+	 * With p_paddr=0x80100000 the loader wrote out of range and the ELF never
+	 * loaded (black screen, not even crt0's debug showed).  Now both loader
+	 * conventions work: p_vaddr=0x80100000 (kseg0, CPU) and p_paddr=0x00100000
+	 * (physical, kernel DMA).
 	 */
-	.text 0x80100000: {
+	.text 0x80100000 : AT(0x00100000) {
 		_ftext = . ;
 		*(.text)
 		*(.text.*)
