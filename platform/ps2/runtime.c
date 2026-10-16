@@ -18,6 +18,22 @@ GSGLOBAL *g_gs;
 static Mmps2Gfx s_gfx;
 static int s_inited;
 
+/*
+ * Paint the whole screen a flat colour and flip.  Used as a boot-stage
+ * breadcrumb that SURVIVES the gsKit init (which clears to black and would
+ * otherwise wipe the early libdebug text).  The colour encodes the last
+ * stage reached -- see the legend in HOW_TO_RUN_PS2.md.  Safe no-op before
+ * gsKit is up (g_gs == NULL).
+ */
+void mmps2_boot_color(int r, int g, int b)
+{
+    if (g_gs == NULL)
+        return;
+    gsKit_clear(g_gs, GS_SETREG_RGBAQ(r, g, b, 0x80, 0));
+    gsKit_queue_exec(g_gs);
+    gsKit_sync_flip(g_gs);
+}
+
 static void runtime_ensure(void)
 {
     if (s_inited)
@@ -43,6 +59,10 @@ static void runtime_ensure(void)
     gsKit_mode_switch(g_gs, GS_ONESHOT);
 
     mmps2_gfx_init(&s_gfx, g_gs);
+
+    /* BLUE: gsKit is up.  If you see solid blue and nothing else, the boot
+     * hung between here and the first display list (e.g. waiting on ROM). */
+    mmps2_boot_color(0, 0, 0xC0);
 }
 
 void mmps2_runtime_init(void)

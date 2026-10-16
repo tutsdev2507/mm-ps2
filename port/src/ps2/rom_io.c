@@ -30,6 +30,7 @@
 #include <fileXio_rpc.h>
 
 extern void mmps2_scr(const char *fmt, ...);
+extern void mmps2_boot_color(int r, int g, int b);
 
 static int s_io_ready;
 
@@ -119,11 +120,15 @@ int mmps2_rom_open(void)
         if (s_fd >= 0) {
             mmps2_log("rom: opened %s", k_rom_paths[i]);
             mmps2_scr("rom: opened %s", k_rom_paths[i]);
+            /* GREEN: ROM found. */
+            mmps2_boot_color(0, 0xC0, 0);
             return 0;
         }
     }
     mmps2_log("rom: ERROR baserom.z64 not found (expected mass:/MMPS2/baserom.z64)");
     mmps2_scr("rom: ERROR baserom.z64 not found");
+    /* RED: no ROM on the drive. */
+    mmps2_boot_color(0xC0, 0, 0);
     return -1;
 }
 

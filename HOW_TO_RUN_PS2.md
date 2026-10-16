@@ -34,23 +34,27 @@ O pacote `mm-ps2_for_ps2.zip` já vem com essa estrutura pronta. Basta extrair d
 
 ## Diagnóstico
 
-**Depuração em tela** (não precisa de log nem de dispositivo nenhum): o jogo
-imprime texto verde na tela a cada estágio do boot, da fonte de debug embutida
-do PS2 (libdebug). Ordem dos marcadores:
+**Tela colorida por estágio** (mais confiável, sobrevive ao init do gsKit):
+após o boot o GS fica numa cor sólida que indica o último estágio alcançado.
+
+| Cor | Significado |
+|---|---|
+| **Preto** | O ELF não arrancou (ou travou antes do gsKit) — confirme que está executando o `MMPS2.ELF` novo. |
+| **Azul** | gsKit/DMA no ar. Travou antes de achar o ROM / antes da 1ª display list. |
+| **Verde** | `baserom.z64` encontrado e aberto. Travou no conteúdo do jogo (M4–M6), não no boot. |
+| **Vermelho** | `baserom.z64` NÃO encontrado no pendrive. Confira o caminho. |
+
+**Depuração em texto na tela** (libdebug, verde): durante o boot (antes do
+gsKit limpar) o jogo imprime marcadores por estágio. Ordem:
 
 ```
-crt0: gp/sp/bss ok -> bootproc   ← o ELF arrancou (se não aparecer nada, o loader não carregou)
+crt0: gp/sp/bss ok -> bootproc   ← o ELF arrancou
 boot: __osInitialize_common      ← entrou no osInitialize
 boot: gsKit up                   ← gsKit/DMA inicializados
-rom: opened mass:/MMPS2/baserom.z64   ← ROM encontrada (ou "rom: ERROR ..." se não achar)
+rom: opened mass:/MMPS2/baserom.z64   ← ROM encontrada (ou "rom: ERROR ...")
 gfx: first display list running  ← o jogo desenhou o primeiro frame
 ```
 
-A **última linha visível** diz onde o boot parou. Se aparecer `rom: ERROR`, o
-baserom não foi encontrado no pendrive. Se aparecer tudo até `gfx:`, o problema
-é de conteúdo (M4–M6), não de boot.
-
-**Log em arquivo** (complementar): o jogo grava `MMPS2/mmps2.log` no pendrive
-(via fileXio). Requer que o launcher já tenha carregado o driver `mass:`.
-Se a tela ficar preta e não houver log, confie na tela — ela funciona sem o
-dispositivo de arquivo.
+**Log em arquivo** (complementar): `MMPS2/mmps2.log` no pendrive (via fileXio).
+Requer driver `mass:` já carregado pelo launcher. Se não houver log, confie na
+tela colorida — ela funciona sem dispositivo de arquivo.
