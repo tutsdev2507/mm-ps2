@@ -1,40 +1,24 @@
 PS2DEV ?= /usr/local/ps2dev
 PS2SDK ?= $(PS2DEV)/ps2sdk
-GSKIT  ?= $(PS2SDK)/ports
+GSKIT  ?= $(PS2DEV)/gsKit
 
-ifneq ($(MM_DIR),)
-override MM_DIR := $(abspath $(MM_DIR))
-endif
+MM_DIR ?= ../../third_party/mm
 
-EE_BIN  = mmps2-boot.elf
-EE_OBJS = boot.o mmps2_os.o gfx.o
+EE_BIN  = MMPS2.ELF
+EE_OBJS = boot.o mmps2_os.o hw_shim.o cache_tlb.o vi_gs.o pi_dma.o rsp_shim.o segloader.o gfx.o
+# audio stubs
+EE_OBJS += audio_stubs.o
 
 vpath %.c ../../port/src/gfx
-EE_INCS += -I$(GSKIT)/include -I../../port/src
+EE_INCS += -I$(GSKIT)/include -I../../port/src -I/usr/local/ps2dev/ps2sdk/ee/include -I/usr/local/ps2dev/ps2sdk/common/include -I. -I../../include -I../../build/generated/audio -I../../include/audio_stubs -I$(MM_DIR)/include -I$(MM_DIR)/include/libc -I$(MM_DIR)
+EE_CFLAGS += -DMMPS2_NATIVE_TYPES -D_EE -G0 -DFRAMEBUFFERS_START_ADDR=0x81F80000
 EE_LDFLAGS += -L$(GSKIT)/lib
-EE_LIBS = -lgskit -ldmakit -lpad -ldebug -lm
-
-# Optional: build the bring-up runtime against the decomp's own libultra gu math
-# (M3). Enable with MM_DIR=<decomp tree> (scripts/setup.sh fetches it). EE_OBJS
-# must be extended before including Makefile.eeglobal, which expands $(EE_OBJS)
-# into the link rule at parse time.
-ifneq ($(MM_DIR),)
-EE_OBJS += gu_adapter.o gu_compat.o perspective.o lookat.o
-endif
+EE_LIBS  = -lgskit -ldmakit -lpad -ldebug -lm -latomic -lfileXio
 
 include $(PS2SDK)/samples/Makefile.pref
 include $(PS2SDK)/samples/Makefile.eeglobal
 
-ifneq ($(MM_DIR),)
-EE_CFLAGS += -DMMPS2_USE_DECOMP_GU
-vpath %.c ../../port/src/ultra $(MM_DIR)/src/libultra/gu
-
-# The decomp gu sources need their own include tree and -D_LANGUAGE_C; give them
-# a static pattern rule so they override Makefile.eeglobal's generic %.o: %.c.
-GUDEC_OBJS := gu_compat.o perspective.o lookat.o
-$(GUDEC_OBJS): %.o: %.c
+# Compile gfx.o with port includes first (avoid decomp std headers shadowing)
+gfx.o: ../../port/src/gfx/gfx.c
 	$(DIR_GUARD)
-	$(EE_CC) $(EE_CFLAGS) -w -D_LANGUAGE_C -DNON_MATCHING \
-	    -I$(MM_DIR)/include -I$(MM_DIR)/include/libc -I$(MM_DIR) \
-	    -c $< -o $@
-endif
+	$(EE_CC) $(EE_CFLAGS) -I$(GSKIT)/include -I../../port/src -I/usr/local/ps2dev/ps2sdk/ee/include -I/usr/local/ps2dev/ps2sdk/common/include -I. -I../../include -I../../build/generated/audio -I../../include/audio_stubs -c $< -o $@

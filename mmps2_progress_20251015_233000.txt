@@ -1,0 +1,23 @@
+PROGRESSO MM-PS2
+Data/hora: 2025-10-15 23:27:00
+Estado: EXECUÇÃO INICIADA (saiu do modo plano)
+
+EXECUTANDO AGORA:
+- Gerando segmap.bin/.h (1568 entradas) OK
+- Próximo: criar dmadata_table_spec.h, headers áudio mínimos, shims hw/vi/pi/cache/rsp/segloader, corrigir ps2_stubs, ajustar Makefile, build EE
+
+PLANEJAMENTO:
+Seguindo plano: MV1->MV2->jogo completo (com RSP/GFX completo ao longo do tempo)
+
+ARQUIVOS CRIADOS:
+- scripts/gen_segmap.py
+- platform/ps2/segmap.bin (44KB)
+- platform/ps2/segmap.h (156B)
+
+PRÓXIMOS:
+- scripts/gen_dmadata_spec.py + include/tables/dmadata/dmadata_table_spec.h
+- build/generated/audio headers mínimos OU stubs .c
+- platform/ps2/{hw_shim.c,vi_gs.c,pi_dma.c,cache_tlb.c,rsp_shim.c,segloader.c,irx_*.s}
+- corrigir ps2_stubs.c (funções reais)
+- platform/ps2/Makefile reescrito p/link com objetos filtrados
+---

@@ -1,0 +1,179 @@
+/*
+# PS2 EE link script for the Majora's Mask port.
+#
+# Derived from $PS2SDK/ee/startup/linkfile, with two deliberate changes:
+#
+#   1. ENTRY(_start) instead of ENTRY(__start) - the port provides its own
+#      entry point in third_party/mm/build/ee/ps2_stubs.c (there is no crt0).
+#
+#   2. The image is linked in kseg0 (0x80000000+) instead of kuseg.  On the
+#      R5900 kseg0 is cached, TLB-independent and maps 1:1 to physical RAM,
+#      exactly like the N64's 0x80000000 region.  That keeps every piece of
+#      N64 address arithmetic valid:
+#          OS_PHYSICAL_TO_K0(osMemSize) == 0x82000000   (top of 32 MiB)
+#          BOOT_ADDRESS_ULTRA          == 0x80000400
+#          Main_InitMemory()'s pointer sweep stays inside one address space
+#      Linking in kuseg would make Main_InitMemory() walk from 0x00xxxxxx to
+#      0x82000000, which crosses unmapped kuseg and faults.
+#
+#   The platform shims above still hand ps2sdk kseg0 pointers; the R5900 DMAC
+#   and gsKit both accept them (address bits [28:0] select the same RAM).
+*/
+
+ENTRY(_start);
+
+PHDRS {
+  text PT_LOAD;
+  data PT_LOAD;
+}
+
+SECTIONS {
+	.text 0x80010000: {
+		_ftext = . ;
+		*(.text)
+		*(.text.*)
+		*(.gnu.linkonce.t*)
+		KEEP(*(.init))
+		KEEP(*(.fini))
+		QUAD(0)
+	} :text
+
+	PROVIDE(_etext = .);
+	PROVIDE(etext = .);
+
+	/* Global/static constructors and deconstructors. */
+	.ctors ALIGN(16): {
+		KEEP(*crtbegin*.o(.ctors))
+		KEEP(*(EXCLUDE_FILE(*crtend*.o) .ctors))
+		KEEP(*(SORT(.ctors.*)))
+		KEEP(*(.ctors))
+	}
+	.dtors ALIGN(16): {
+		KEEP(*crtbegin*.o(.dtors))
+		KEEP(*(EXCLUDE_FILE(*crtend*.o) .dtors))
+		KEEP(*(SORT(.dtors.*)))
+		KEEP(*(.dtors))
+	}
+
+	.reginfo : { *(.reginfo) }
+
+	.data ALIGN(128): {
+		_fdata = . ;
+		*(.data)
+		*(.data.*)
+		*(.gnu.linkonce.d*)
+		SORT(CONSTRUCTORS)
+	} :data
+
+	/* Static data.  */
+	.rodata ALIGN(128): {
+		*(.rodata)
+		*(.rodata.*)
+		*(.gnu.linkonce.r*)
+	} :data
+
+	.rdata ALIGN(128): { *(.rdata) } :data
+	.gcc_except_table ALIGN(128): { *(.gcc_except_table) } :data
+
+	_gp = ALIGN(128) + 0x7ff0;
+	.lit4 ALIGN(128): { *(.lit4) }
+	.lit8 ALIGN(128): { *(.lit8) }
+
+	.sdata ALIGN(128): {
+		*(.sdata)
+		*(.sdata.*)
+		*(.gnu.linkonce.s*)
+	} :data
+
+	_edata = .;
+	PROVIDE(edata = .);
+
+	/* Uninitialized data.  */
+	.sbss ALIGN(128) : {
+		_fbss = . ;
+		*(.sbss)
+		*(.sbss.*)
+		*(.gnu.linkonce.sb*)
+		*(.scommon)
+	} :data
+
+	.bss ALIGN(128) : {
+		*(.bss)
+		*(.bss.*)
+		*(.gnu.linkonce.b*)
+		*(COMMON)
+	} :data
+	_end_bss = .;
+
+	_end = . ;
+	PROVIDE(end = .);
+
+	.spad 0x70000000 : { *(.spad) }
+
+	/* Symbols needed by crt0.s (unused, but harmless to define).  */
+	PROVIDE(_heap_size = -1);
+	PROVIDE(_stack = -1);
+	PROVIDE(_stack_size = 128 * 1024);
+
+	/* ------------------------------------------------------------------
+	 * N64 segment symbols (include/segment_symbols.h).
+	 *
+	 * The decomp expects one ELF per ROM segment; the PS2 port links a
+	 * single flat image, so these are synthesised.  They are the values the
+	 * original boot code consumes in src/boot/idle.c and src/code/main.c:
+	 *
+	 *   Main_InitMemory()
+	 *     clear [BOOT_ADDRESS_ULTRA, SEGMENT_START(framebuffer_lo))
+	 *     clear [&gLoBuffer.skyboxBuffer, SEGMENT_END(framebuffer_lo))
+	 *     clear [SEGMENT_END(code), OS_PHYSICAL_TO_K0(osMemSize))
+	 *   Main_Init()
+	 *     clear [SEGMENT_BSS_START(code), SEGMENT_BSS_END(code))
+	 *   Main()
+	 *     sysHeap = SEGMENT_END(buffers)
+	 *
+	 * framebuffer_lo is made an empty range so both framebuffer clears are
+	 * skipped: its contents live in the flat image, and Main_InitScreen()
+	 * already paints gLoBuffer.framebuffer.  The `code` range deliberately
+	 * extends MMPS2_HEAP_RESERVE bytes past _end - that window holds the
+	 * newlib/gsKit heap allocated during __osInitialize_common(), which must
+	 * not be zeroed by Main_InitMemory().  Everything above it really is
+	 * wiped, exactly as the N64 wipes the RAM past its code+buffers.
+	 *
+	 * Main() bounds the system heap with FRAMEBUFFERS_START_ADDR, which the
+	 * N64 puts at 0x80780000 (the end of the Expansion Pak window minus
+	 * sizeof(BufferHigh)).  This image is ~7.6 MiB starting at 0x80010000 and
+	 * therefore ends near 0x807A4000 - past that mark - so the port compiles
+	 * main.c with -DFRAMEBUFFERS_START_ADDR=0x81F80000, the top of the EE's
+	 * 32 MiB minus sizeof(BufferHigh).  gHiBuffer itself is used by address
+	 * (SysCfb_Init takes &gHiBuffer), so it stays wherever the link put it.
+	 * ------------------------------------------------------------------ */
+
+	MMPS2_HEAP_RESERVE = 0x200000;
+
+	_framebuffer_loSegmentStart = 0x80000400;
+	_framebuffer_loSegmentEnd   = 0x80000400;
+
+	_bootSegmentStart     = ADDR(.text);
+	_bootSegmentEnd       = _end + MMPS2_HEAP_RESERVE;
+	_bootSegmentRomStart  = 0;
+	_bootSegmentRomEnd    = 0;
+
+	_codeSegmentStart     = ADDR(.text);
+	_codeSegmentEnd       = _end + MMPS2_HEAP_RESERVE;
+	/* The .bss clear in Main_Init() exists on N64 because the code segment
+	 * is re-DMA'd from ROM and arrives with uninitialised bss.  Here the
+	 * loader has already zeroed .bss, and the flat image also contains
+	 * ps2sdk/libkernel/gsKit statics that were populated at runtime during
+	 * __osInitialize_common().  Clearing again would silently destroy the
+	 * vsync handler list and stdio state, so the range is deliberately
+	 * empty. */
+	_codeSegmentBssStart  = _end_bss;
+	_codeSegmentBssEnd    = _end_bss;
+	/* Code is already resident in the image, so its ROM image is empty;
+	 * Main_Init()'s reload of the code segment becomes a zero-byte DMA. */
+	_codeSegmentRomStart  = 0;
+	_codeSegmentRomEnd    = 0;
+
+	_buffersSegmentStart  = _end;
+	_buffersSegmentEnd    = _end + MMPS2_HEAP_RESERVE;
+}

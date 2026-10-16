@@ -59,6 +59,22 @@ tracked per tile descriptor. Unknown commands are no-ops so lists run.
 Addresses in `w1` are resolved through the 16-entry segment table (`gsSPSegment`), falling
 back to a raw pointer for hand-built lists.
 
+## Current status (2026-10-16)
+
+The full decompiled game now **compiles and links** for the EE into a single
+code-only ELF (`third_party/mm/build/ee/MMPS2.ELF`, ~11 MB, **0 undefined
+symbols**). Assets are stubbed at link time and are meant to be streamed from
+the ROM at runtime.
+
+**It does not run yet** — on real PS2 the screen stays black. The blocking
+problem is that the runtime asset loader is still a stub
+(`platform/ps2/pi_dma.c` does not read the ROM), so segment DMAs return
+garbage and the engine stalls before the title screen.
+
+See **[HANDOFF.md](HANDOFF.md)** for the exact state, the boot flow, the build
+pipeline, and the next concrete step (implementing the loader). Quick build:
+`scripts/build_full_game.sh`.
+
 ## Roadmap / milestones
 
 - [x] **M0 — toolchain harness**: build a bootable PS2 ELF that inits gsKit and

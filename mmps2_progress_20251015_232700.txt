@@ -1,0 +1,63 @@
+PROGRESSO MM-PS2
+Data/hora: 2025-10-15 23:27:00
+Estado: EXECUÇÃO INICIADA (saiu do modo plano)
+
+EXECUTANDO AGORA:
+- Gerando segmap.bin/.h (1568 entradas) OK
+- Próximo: criar dmadata_table_spec.h, headers áudio mínimos, shims hw/vi/pi/cache/rsp/segloader, corrigir ps2_stubs, ajustar Makefile, build EE
+
+PLANEJAMENTO:
+Seguindo plano: MV1->MV2->jogo completo (com RSP/GFX completo ao longo do tempo)
+
+ARQUIVOS CRIADOS:
+- scripts/gen_segmap.py
+- platform/ps2/segmap.bin (44KB)
+- platform/ps2/segmap.h (156B)
+
+PRÓXIMOS:
+- scripts/gen_dmadata_spec.py + include/tables/dmadata/dmadata_table_spec.h
+- build/generated/audio headers mínimos OU stubs .c
+- platform/ps2/{hw_shim.c,vi_gs.c,pi_dma.c,cache_tlb.c,rsp_shim.c,segloader.c,irx_*.s}
+- corrigir ps2_stubs.c (funções reais)
+- platform/ps2/Makefile reescrito p/link com objetos filtrados
+
+[233000] CRIADO:
+- scripts/gen_dmadata_spec.py
+- include/tables/dmadata/dmadata_table_spec.h
+
+PRÓXIMO: criar stubs de áudio mínimos (samplebank_table, soundfont_table, sequence_sizes, soundfont_sizes) para permitir compilar os 4 arquivos ou gerar versões stub C. Opção: criar build/generated/audio com headers vazios que satisfaçam referências, OU substituir os .c problemáticos por stubs compatíveis.
+
+[233300] AUDIO HEADERS STUBS CRIADOS:
+- build/generated/audio/{samplebank_table.h,soundfont_table.h,sequence_sizes.h,soundfont_sizes.h}
+- include/audio_stubs/{samplebank_table.h,soundfont_table.h}
+- build/generated/audio/audio_stubs.c
+
+PRÓXIMO: criar hw_shim.c (osInitialize + base), vi_gs.c, pi_dma.c (fileXio mass0:), cache_tlb.c, rsp_shim.c, segloader.c, irx bin2s stubs ou gerar .s
+
+[233600] SHIMS CRIADOS:
+- platform/ps2/hw_shim.c
+- platform/ps2/cache_tlb.c
+- platform/ps2/vi_gs.c
+- platform/ps2/rsp_shim.c
+
+[233700] PI/SEGLOADER STUBS CRIADOS:
+- platform/ps2/segloader.c
+- platform/ps2/pi_dma.c (osEPiStartDma stub)
+
+PRÓXIMO: criar irx bin2s .s files (iomanX, fileXio, usbd, usb_mass) OU usar apenas SifLoadModule se disponível. Também corrigir ps2_stubs.c para ter funções reais p/ cache/os ops. Ajustar Makefile.
+
+[233900] IRX: bin2s não encontrado no ambiente. Vamos pular embed bin2s por ora; usaremos SifLoadModule via fileXio se necessário, ou copiar IRX p/ USB. Também podemos gerar IRX .o manualmente via objcopy se acharmos bin2s depois. Continuando: ajustar Makefile, corrigir ps2_stubs, criar hw/rsp/segloader com lógica mínima funcional.
+
+[234000] Makefile novo criado (sem IRX bin2s por enquanto). Próximo: corrigir ps2_stubs.c - separar funções reais (osInitialize/cache/ints) de dados; e adicionar declarations necessárias. Também criar boot modificado p/ chamar bootproc (mas manter compatível).
+
+[234100] ps2_stubs_fix.c criado com dados necessários. Também já temos hw_shim/cache definindo funções. Próximo: tentar compilar objetos dos novos arquivos + linkar com objetos filtrados do decomp. Vamos gerar lista de objetos US (já temos objlist_us* antes) e adicionar novos .o.
+
+[234200] hw_shim.c tem conflito com declarações do decomp. Vamos compilar com menos includes ou compilar direto no contexto do decomp usando suas includes? Melhor: colocar os shims com includes corretos e compilar dentro do build decomp.
+
+[234300] Compilando novos shims. Dando prioridade à compilação direta com includes do decomp.
+
+[234400] Conflitos de headers com decomp. Solução prática: compilar shims com defines mínimos, ou usar apenas includes necessários. Também podemos compilar os shims standalone com includes PS2 puro + ultra64 mínimo. Vou ajustar os includes.
+
+[234500] Compilando pi_dma.o, rsp_shim.o, boot.o, mmps2_os.o (já existem), e outros shims
+
+[234600] Corrigindo conflitos de tipos; compilando shims com cuidado.

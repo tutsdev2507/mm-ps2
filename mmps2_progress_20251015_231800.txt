@@ -1,0 +1,37 @@
+PROGRESSO MM-PS2
+Data/hora: 2025-10-15 23:18:00
+Estado: MODO EXECUÇÃO ATIVADO
+
+FASE ATUAL: 0/7 - Link hygiene
+
+O QUE FIZ AGORA:
+- Sai do modo plano (conforme instrução)
+- Criei arquivo de progresso conforme solicitado
+- Mapeei conflitos: libultra/os (29 .o) e libultra/io (65 .o) precisam ser excluídos do archive
+- Identifiquei símbolos críticos: osInitialize, osEPiStartDma/osPiStartDma, osCreateViManager, osSpTaskStartGo, __osSp*, osVirtualToPhysical, cache ops
+- Verifiquei shims atuais: mmps2_os.c cobre threads/mesg (13), faltam hw_shim/vi_gs/pi_dma/cache_tlb/rsp_shim/segloader
+- Verifiquei dados: baserom (1559 arquivos, 50MB), dmadata (25088 bytes), audio XMLs, ROM USA 33.5MB
+
+PROXIMOS PASSOS:
+1. Gerar dmadata_table_spec.h a partir de dmadata+spec
+2. Gerar segmap.bin/.h (vrom->arquivo)
+3. Criar hw_shim.c com osInitialize + PI/VI/base
+4. Criar vi_gs.c (VI->gsKit)
+5. Criar pi_dma.c (fileXio mass0:/MMPS2)
+6. Criar cache_tlb.c (cache ops reais EE)
+7. Criar rsp_shim.c (osSpTaskStartGo hook -> gfx)
+8. Criar segloader.c (mapeamento + leitura)
+9. Corrigir ps2_stubs.c (funções vs dados)
+10. Gerar headers áudio mínimos (ou stubs C)
+11. Ajustar Makefile + link EE com objetos filtrados
+12. Compilar + linkar MMPS2.ELF
+13. Empacotar USB + testar no PS2
+
+ARQUIVOS A MODIFICAR/CRIAR:
+platform/ps2/{hw_shim.c,vi_gs.c,pi_dma.c,cache_tlb.c,rsp_shim.c,segloader.c,irx_*.s,.h}
+scripts/{gen_segmap.py,gen_dmadata_spec.py,make_usb.sh}
+include/tables/dmadata/dmadata_table_spec.h (novo)
+build/generated/* (audio minimal)
+platform/ps2/Makefile (modificar)
+
+STATUS LINK: mm_full.elf 47MB OK (0 undef/0 multdef) mas usa dummy stubs + decomp libultra hardware

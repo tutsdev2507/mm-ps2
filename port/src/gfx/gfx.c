@@ -1,4 +1,8 @@
+#include <stdlib.h>
+#include <math.h>
+void *malloc(size_t);
 // F3DEX2 display-list interpreter -> gsKit (PlayStation 2 GS).
+
 //
 // This is the M2 milestone: walk a display list built with the gs* macros in
 // gbi.h, keep the vertex buffer / matrix stacks / RDP state, and emit gsKit
@@ -8,7 +12,7 @@
 // rasterised, and unknown commands are no-ops so lists still "run".
 #include <stdint.h>
 #include <stdio.h>
-#include <stdlib.h>
+
 #include <string.h>
 #include <math.h>
 #include <gsKit.h>
@@ -585,7 +589,7 @@ static void emit_triangle(Mmps2Gfx *g, int a, int b, int c)
         float v1 = wrap_uv((float)vb->tc[1] * st, H);
         float u2 = wrap_uv((float)vc->tc[0] * ss, W);
         float v2 = wrap_uv((float)vc->tc[1] * st, H);
-        if (getenv("MMPS2_TEXDBG")) {
+        if (0) {
             static int dbg;
             if (dbg++ < 20000)
                 fprintf(stderr, "TEXDBG w=%u h=%u scaleS=0x%x scaleT=0x%x "
