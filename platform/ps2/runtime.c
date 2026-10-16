@@ -9,6 +9,7 @@
  */
 
 #include <gsKit.h>
+#include <dmaKit.h>
 
 #include "gfx/gfx.h"
 
@@ -22,6 +23,11 @@ static void runtime_ensure(void)
     if (s_inited)
         return;
     s_inited = 1;
+
+    /* gsKit needs the GIF DMA channel up (as in every gsKit sample). */
+    dmaKit_init(D_CTRL_RELE_OFF, D_CTRL_MFD_OFF, D_CTRL_STS_UNSPEC,
+                D_CTRL_STD_OFF, D_CTRL_RCYC_8, 1 << DMA_CHANNEL_GIF);
+    dmaKit_chan_init(DMA_CHANNEL_GIF);
 
     g_gs = gsKit_init_global();
     if (g_gs == NULL)

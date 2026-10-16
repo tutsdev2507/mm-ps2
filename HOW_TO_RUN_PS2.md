@@ -15,7 +15,7 @@ O pacote `mm-ps2_for_ps2.zip` já vem com essa estrutura pronta. Basta extrair d
 
 ## Como executar
 
-1. **uLaunchELF** (mais direto) - Abra uLaunchELF, vá em `File Browser > mass0:/MMPS2/` e rode `MMPS2.ELF`.
+1. **uLaunchELF** (mais direto) - Abra uLaunchELF, vá em `File Browser > mass:/MMPS2/` e rode `MMPS2.ELF`.
 2. **OPL** - Coloque a pasta `MMPS2/` inteira dentro de `mass0:/APPS/`. Assim fica: `mass0:/APPS/MMPS2/MMPS2.ELF` e `baserom.z64` junto.
 3. **HDLoader/ETH** - Similar ao OPL.
 
@@ -31,3 +31,7 @@ O pacote `mm-ps2_for_ps2.zip` já vem com essa estrutura pronta. Basta extrair d
 - ELF code-only: 11 MB. Assets carregados em runtime via PI DMA do baserom.
 - Link limpo (0 símbolos indefinidos), boot chain completa (_start → bootproc).
 - Interpretador F3DEX2 + gsKit implementado. Sistema de boot/threading funcional.
+
+## Diagnóstico
+
+O jogo grava `MMPS2/mmps2.log` no pendrive. Se a tela ficar preta, envie esse arquivo.

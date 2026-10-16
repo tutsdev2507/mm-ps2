@@ -28,7 +28,10 @@ PHDRS {
 }
 
 SECTIONS {
-	.text 0x80010000: {
+	/* 0x80100000 == physical 0x100000: the EE kernel owns the first 1 MiB of
+	 * RAM, linking below that overwrites it on load (that was the black screen).
+	 */
+	.text 0x80100000: {
 		_ftext = . ;
 		*(.text)
 		*(.text.*)
@@ -105,6 +108,16 @@ SECTIONS {
 	} :data
 	_end_bss = .;
 
+	/* Main thread stack lives inside the image, AFTER the cleared .bss, so
+	 * crt0 can zero .bss while running on it, and so Main_InitMemory()
+	 * (which wipes everything above _end + MMPS2_HEAP_RESERVE) never touches
+	 * it. */
+	.mmps2_stack ALIGN(64) (NOLOAD) : {
+		_mmps2_stack_bottom = . ;
+		. += 0x40000;
+		_mmps2_stack_top = . ;
+	} :data
+
 	_end = . ;
 	PROVIDE(end = .);
 
@@ -141,7 +154,7 @@ SECTIONS {
 	 *
 	 * Main() bounds the system heap with FRAMEBUFFERS_START_ADDR, which the
 	 * N64 puts at 0x80780000 (the end of the Expansion Pak window minus
-	 * sizeof(BufferHigh)).  This image is ~7.6 MiB starting at 0x80010000 and
+	 * sizeof(BufferHigh)).  This image is ~7.6 MiB starting at 0x80100000 and
 	 * therefore ends near 0x807A4000 - past that mark - so the port compiles
 	 * main.c with -DFRAMEBUFFERS_START_ADDR=0x81F80000, the top of the EE's
 	 * 32 MiB minus sizeof(BufferHigh).  gHiBuffer itself is used by address
@@ -161,8 +174,9 @@ SECTIONS {
 	_codeSegmentStart     = ADDR(.text);
 	_codeSegmentEnd       = _end + MMPS2_HEAP_RESERVE;
 	/* The .bss clear in Main_Init() exists on N64 because the code segment
-	 * is re-DMA'd from ROM and arrives with uninitialised bss.  Here the
-	 * loader has already zeroed .bss, and the flat image also contains
+	 * is re-DMA'd from ROM and arrives with uninitialised bss.  Here
+	 * crt0_mmps2.c zeroes .bss itself before bootproc (do not trust the ELF
+	 * loader to do it), and the flat image also contains
 	 * ps2sdk/libkernel/gsKit statics that were populated at runtime during
 	 * __osInitialize_common().  Clearing again would silently destroy the
 	 * vsync handler list and stdio state, so the range is deliberately

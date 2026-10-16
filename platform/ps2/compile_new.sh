@@ -41,8 +41,8 @@ else
          /src/platform/ps2/runtime.c \
          /src/platform/ps2/cache_tlb.c /src/platform/ps2/vi_gs.c \
          /src/platform/ps2/pi_dma.c /src/platform/ps2/rsp_shim.c \
-         /src/platform/ps2/segloader.c /src/platform/ps2/audio_stubs.c \
-         /src/platform/ps2/dmadata_ps2.c /src/port/src/gfx/gfx.c"
+         /src/platform/ps2/segloader.c /src/platform/ps2/crt0_mmps2.c /src/platform/ps2/audio_stubs.c \
+         /src/platform/ps2/dmadata_ps2.c /src/port/src/gfx/gfx.c /src/port/src/ps2/rom_io.c"
 fi
 
 rc=0

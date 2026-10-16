@@ -112,6 +112,32 @@ mass0:/MMPS2/baserom.z64      (ou baserom-decompressed.z64)
 execute o ELF via uLaunchELF ou OPL. **Hoje isso mostra tela preta** (assets não
 carregam).
 
+## Correções de boot (2026-10-16, tarde) — NÃO TESTADAS em hardware
+
+Análise do `MMPS2.ELF` mostrou que a tela preta tinha causas anteriores ao
+`pi_dma`:
+
+1. **Imagem linkada em 0x80010000 (físico 0x10000)** = em cima do kernel do
+   EE (1º MiB da RAM). Agora `.text` começa em `0x80100000` (`linkfile`).
+2. **Sem crt0**: o `_start` antigo (em `build/ee/ps2_stubs.c`) só chamava
+   `bootproc`. Agora `platform/ps2/crt0_mmps2.c` define `_start` (gp, pilha
+   própria dentro da imagem, zera `.bss`, chama `bootproc`) e `_sbrk` (heap
+   de 2 MiB logo após `_end`). Precisa vencer o `_start` antigo: está em
+   `obj_ps2`, que é linkado antes de `ps2_stubs.o` (`--allow-multiple-definition`).
+3. **I/O de arquivo** (`port/src/ps2/rom_io.c`) usa `fioOpen/fioRead` do
+   ps2sdk (não depende de init da libc) e lê via buffer alinhado.
+   `pi_dma.c` agora lê o ROM de verdade.
+4. **Log em arquivo**: `mass:/MMPS2/mmps2.log` (linhas `rom:`, `dma:`, `boot:`,
+   `gfx:`). A última linha mostra até onde o boot chegou.
+5. `runtime.c` inicializa o canal DMA GIF (`dmaKit`) antes do gsKit.
+
+Para aplicar: apague `build/ee/obj_ps2`, rode `compile_new.sh` (agora inclui
+`crt0_mmps2.c` e `rom_io.c`) e `link_full_elf.sh`.
+
+Riscos conhecidos ainda abertos: endianness dos assets (ROM é big-endian),
+`Main_InitMemory` apagando RAM até 0x82000000, heap de 2 MiB pequeno para
+texturas decodificadas, entrada/áudio/save (M4–M6) não iniciados.
+
 ## Próximo passo concreto (para quem continuar)
 
 ### 1. Implementar `pi_dma.c` de verdade  ← maior valor

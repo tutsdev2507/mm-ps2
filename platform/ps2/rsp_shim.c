@@ -14,6 +14,7 @@
 
 /* runtime.c */
 extern void mmps2_run_dl(void *dl);
+extern void mmps2_log(const char *fmt, ...);
 
 #ifndef OS_YIELD
 #define OS_YIELD 1
@@ -28,9 +29,13 @@ void osSpTaskLoad(OSTask *task)
 
 void osSpTaskStartGo(OSTask *task)
 {
+    static unsigned s_frames;
     s_yielded = 0;
     if (task == NULL)
         return;
+    if (s_frames < 5 || (s_frames % 600) == 0)
+        mmps2_log("gfx: task #%u type=%u dl=%08x", s_frames, (unsigned)task->t.type, (unsigned)(uintptr_t)task->t.data_ptr);
+    s_frames++;
     mmps2_run_dl((void *)(uintptr_t)task->t.data_ptr);
 }
 
